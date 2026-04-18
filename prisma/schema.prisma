@@ -62,6 +62,8 @@ model User {
   Notification        Notification[]
   UserDevice          UserDevice[]
   cashierStations     FuelStation[]        @relation("CashierStation")
+  subscriptions       Subscription[]
+  walletTx            WalletTransaction[]
   telegramSetting     TelegramSetting?
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
@@ -439,8 +441,79 @@ model Card {
   updatedAt DateTime @updatedAt
 
   PaymentTransaction PaymentTransaction[]
+  WalletTransaction  WalletTransaction[]
 
   @@index([userId])
+}
+
+enum DiscountType {
+  NONE
+  PERCENTAGE
+  FIXED_PRICE
+}
+
+model SubscriptionPlan {
+  id               Int            @id @default(autoincrement())
+  titleUz          String         @db.VarChar(100)
+  titleRu          String         @db.VarChar(100)
+  descriptionUz    String
+  descriptionRu    String
+  durationDays     Int
+  discountType     DiscountType   @default(NONE)
+  basePrice        Float
+  discountPercent  Int            @default(0)
+  fixedDiscountPrice Float?
+  isActive         Boolean        @default(true)
+
+  subscriptions    Subscription[]
+  walletTx         WalletTransaction[]
+
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  @@index([isActive])
+}
+
+model Subscription {
+  id                    Int              @id @default(autoincrement())
+  userId                Int
+  user                  User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  startDate             DateTime
+  endDate               DateTime
+  isActive              Boolean          @default(true)
+  subscriptionsPlansId  Int
+  subscriptionsPlan     SubscriptionPlan @relation(fields: [subscriptionsPlansId], references: [id])
+
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+
+  @@index([userId])
+  @@index([subscriptionsPlansId])
+  @@index([isActive])
+}
+
+model WalletTransaction {
+  id                    Int              @id @default(autoincrement())
+  cardId                Int?
+  card                  Card?            @relation(fields: [cardId], references: [id])
+  userId                Int
+  user                  User             @relation(fields: [userId], references: [id])
+  amount                Float
+  subscriptionsPlansId  Int?
+  subscriptionsPlan     SubscriptionPlan? @relation(fields: [subscriptionsPlansId], references: [id])
+  provider              String?
+  status                PaymentStatus    @default(PENDING)
+  externalId            String?
+  errorCode             String?
+  errorMessage          String?
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+
+  @@index([userId])
+  @@index([cardId])
+  @@index([subscriptionsPlansId])
+  @@index([status])
+  @@index([externalId])
 }
 
 model TelegramSetting {

@@ -32,6 +32,8 @@ import { OcppModule } from './modules/ocpp/ocpp.module';
 import { SocketModule } from './modules/socket/socket.module';
 import { ClickModule } from './modules/click/click.module';
 import { TelegramModule } from './modules/telegram/telegram.module';
+import { SubscriptionPlanModule } from './modules/subscription-plan/subscription-plan.module';
+import { SubscriptionModule } from './modules/subscription/subscription.module';
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -68,6 +70,8 @@ import { TelegramModule } from './modules/telegram/telegram.module';
     SocketModule,
     ClickModule,
     TelegramModule,
+    SubscriptionPlanModule,
+    SubscriptionModule,
   ],
   providers: [
     {
