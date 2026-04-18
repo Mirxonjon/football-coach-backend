@@ -5,12 +5,10 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { JwtService } from '@nestjs/jwt';
-import { SendOtpDto } from '@/types/auth/send-otp.dto';
 import { VerifyOtpDto } from '@/types/auth/verify-otp.dto';
 import { LoginWithPasswordDto } from '@/types/auth/login.dto';
 import { RequestOtpDto } from '@/types/auth/request-otp.dto';
 import { VerifyLoginOtpDto } from '@/types/auth/verify-login-otp.dto';
-import { RefreshDto } from '@/types/auth/refresh.dto';
 import { ForgotPasswordDto } from '@/types/auth/forgot-password.dto';
 import { VerifyResetOtpDto } from '@/types/auth/verify-reset-otp.dto';
 import { SetNewPasswordDto } from '@/types/auth/set-new-password.dto';
@@ -61,14 +59,14 @@ export class AuthService {
       });
     }
 
-    let code = await this.otpService.generateAndStoreOtp(dto.phone, user.id);
+    const code = await this.otpService.generateAndStoreOtp(dto.phone, user.id);
 
     // try to send sms, but do not fail if provider fails
     try {
       if (dto.phone !== '+998987654321') {
         await this.smsService.sendOtp(dto.phone, code);
       }
-    } catch (e) {
+    } catch (_e) {
       // swallow provider error per requirements
     }
 
@@ -115,7 +113,7 @@ export class AuthService {
     );
     try {
       await this.smsService.sendOtp(dto.phone, code);
-    } catch (e) {
+    } catch (_e) {
       // swallow provider errors per requirements
     }
     return { message: 'OTP sent', code };
@@ -184,7 +182,7 @@ export class AuthService {
     let payload: any;
     try {
       payload = this.jwt.verify(refreshToken);
-    } catch (e) {
+    } catch (_e) {
       throw new UnauthorizedException('Invalid refresh token');
     }
 
@@ -216,7 +214,7 @@ export class AuthService {
     return this.issueTokensAndPersistSession(payload.sub, device);
   }
 
-  async logout(userId: number, device: DeviceInfo) {
+  async logout(userId: number, _device: DeviceInfo) {
     // delete sessions matching user and optionally userAgent/ip
     await this.prisma.session.deleteMany({ where: { userId } });
     return { success: true };
@@ -233,7 +231,9 @@ export class AuthService {
     const code = await this.otpService.generateAndStoreOtp(dto.phone, user.id);
     try {
       await this.smsService.sendOtp(dto.phone, code);
-    } catch (e) {}
+    } catch (_e) {
+      // swallow provider error per requirements
+    }
 
     return { success: true, code };
   }

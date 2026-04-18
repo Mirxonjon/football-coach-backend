@@ -9,11 +9,11 @@ export class FrontendGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     @WebSocketServer()
     server: Server;
 
-    afterInit(server: Server) {
+    afterInit(_server: Server) {
         this.logger.log('Frontend Socket.io Gateway Initialized');
     }
 
-    handleConnection(client: Socket, ...args: any[]) {
+    handleConnection(client: Socket, ..._args: any[]) {
         this.logger.debug(`Frontend Client Connected: ${client.id}`);
     }
 

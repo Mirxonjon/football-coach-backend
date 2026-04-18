@@ -16,7 +16,6 @@ import {
   ApiBody,
   ApiOperation,
   ApiQuery,
-  ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
 import { FuelPumpStatusLogService } from './fuel-pump-status-log.service';

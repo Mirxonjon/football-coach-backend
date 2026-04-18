@@ -10,7 +10,7 @@ import {
   Min,
 } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
-import { ConnectorStatus, FuelCategory } from '@prisma/client';
+import { ConnectorStatus } from '@prisma/client';
 
 export enum FuelFilterCategory {
   PETROL = 'PETROL',

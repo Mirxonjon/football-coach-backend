@@ -1,7 +1,7 @@
 import { Injectable, Logger, BadRequestException, HttpException, HttpStatus } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
-import { PaymentStatus, SessionStatus } from '@prisma/client';
+import { PaymentStatus } from '@prisma/client';
 import * as crypto from 'crypto';
 
 @Injectable()
@@ -50,7 +50,7 @@ export class ClickService {
 
     // 2. Click Webhook: PREPARE (action=0)
     async prepare(data: any) {
-        const { click_trans_id, merchant_trans_id, amount, action } = data;
+        const { click_trans_id, merchant_trans_id, amount } = data;
         this.logger.log(`Processing Click Prepare: click_trans_id=${click_trans_id}, merchant_trans_id=${merchant_trans_id}, amount=${amount}`);
 
         if (!this.validateSignature(data, 0)) {
@@ -92,7 +92,7 @@ export class ClickService {
 
     // 3. Click Webhook: COMPLETE (action=1)
     async complete(data: any) {
-        const { click_trans_id, merchant_trans_id, amount, error, action, merchant_prepare_id } = data;
+        const { click_trans_id, merchant_trans_id, amount, error } = data;
         this.logger.log(`Processing Click Complete: click_trans_id=${click_trans_id}, merchant_trans_id=${merchant_trans_id}, error=${error}`);
 
         if (!this.validateSignature(data, 1)) {

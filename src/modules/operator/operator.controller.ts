@@ -17,7 +17,6 @@ import {
   ApiBody,
   ApiOperation,
   ApiQuery,
-  ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
 import { OperatorService } from './operator.service';

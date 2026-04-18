@@ -1,7 +1,6 @@
 import { Module, OnModuleInit } from '@nestjs/common';
-import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ConfigModule } from '@nestjs/config';
 import {
-  TelegramConfig,
   appConfig,
   dbConfig,
   minioConfig,
@@ -12,7 +11,6 @@ import { CronJobModule } from './common/cron/cron.module';
 import { PrismaModule } from './modules/prisma/prisma.module';
 import { AllExceptionFilter } from './common/filter/all-exceptions.filter';
 
-import { TelegrafModule } from 'nestjs-telegraf';
 import { VehicleModule } from './modules/vehicle/vehicle.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';

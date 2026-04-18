@@ -29,7 +29,7 @@ export class OcppServer implements OnModuleInit, OnModuleDestroy {
 
         this.wss.on('connection', (ws: WebSocket, req) => {
             // Extract numeric id from the URL, e.g., /ocpp/1
-            const defaultPathMatch = req.url?.match(/\/ocpp\/([^\/]+)/);
+            const defaultPathMatch = req.url?.match(/\/ocpp\/([^/]+)/);
             const stationIdStr = defaultPathMatch ? defaultPathMatch[1] : null;
             const stationId = stationIdStr ? parseInt(stationIdStr, 10) : NaN;
 

@@ -17,13 +17,11 @@ import {
   ApiBody,
   ApiOperation,
   ApiQuery,
-  ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
 import { FuelPumpFuelService } from './fuel-pump-fuel.service';
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard';
 import { RolesGuard } from '@/modules/auth/guards/roles.guard';
-import { Roles } from '@/modules/auth/decorators/roles.decorator';
 import { CreateFuelPumpFuelDto } from '@/types/fuel-pump-fuel/create-fuel-pump-fuel.dto';
 import { UpdateFuelPumpFuelDto } from '@/types/fuel-pump-fuel/update-fuel-pump-fuel.dto';
 import { FilterFuelPumpFuelDto } from '@/types/fuel-pump-fuel/filter-fuel-pump-fuel.dto';

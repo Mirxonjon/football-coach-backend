@@ -1,5 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString, IsInt, Min, Max, IsNumber, IsEnum, IsBoolean } from 'class-validator';
+import { IsOptional, IsString, IsInt, Min, Max } from 'class-validator';
 
 export class CarFilterDto {
   @ApiPropertyOptional({ example: 'Tesla' })

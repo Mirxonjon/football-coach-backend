@@ -1,10 +1,9 @@
 import { Body, Controller, Delete, Get, Header, HttpCode, HttpStatus, Param, ParseIntPipe, Patch, Post, Query, Res, UseGuards } from '@nestjs/common';
 import { Response } from 'express';
-import { ApiBearerAuth, ApiBody, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiBody, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { FuelPumpService } from './fuel-pump.service';
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard';
 import { RolesGuard } from '@/modules/auth/guards/roles.guard';
-import { Roles } from '@/modules/auth/decorators/roles.decorator';
 import { CreateFuelPumpDto } from '@/types/fuel-pump/create-fuel-pump.dto';
 import { UpdateFuelPumpDto } from '@/types/fuel-pump/update-fuel-pump.dto';
 import { FilterFuelPumpDto } from '@/types/fuel-pump/filter-fuel-pump.dto';

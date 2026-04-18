@@ -310,7 +310,7 @@ export class FuelSessionService {
           type: 'FUEL_SESSION_COMPLETED',
           data: { sessionId: updated.id },
         });
-      } catch (e) {
+      } catch (_e) {
         // ignore notification errors
       }
     }

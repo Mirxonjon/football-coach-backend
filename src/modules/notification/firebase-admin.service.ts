@@ -22,8 +22,11 @@ export class FirebaseAdminService {
       if (credsPath) {
         const fullPath = path.resolve(process.cwd(), credsPath);
 
+        // Dynamic require needed for runtime JSON credential loading
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const creds = require(fullPath);
         admin.initializeApp({
-          credential: admin.credential.cert(require(fullPath)),
+          credential: admin.credential.cert(creds),
         });
 
         this.initialized = true;

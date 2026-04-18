@@ -17,15 +17,8 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
-import { SendOtpDto } from '@/types/auth/send-otp.dto';
 import { VerifyOtpDto } from '@/types/auth/verify-otp.dto';
-import { LoginWithPasswordDto } from '@/types/auth/login.dto';
-import { RequestOtpDto } from '@/types/auth/request-otp.dto';
-import { VerifyLoginOtpDto } from '@/types/auth/verify-login-otp.dto';
 import { RefreshDto } from '@/types/auth/refresh.dto';
-import { ForgotPasswordDto } from '@/types/auth/forgot-password.dto';
-import { VerifyResetOtpDto } from '@/types/auth/verify-reset-otp.dto';
-import { SetNewPasswordDto } from '@/types/auth/set-new-password.dto';
 import { Public } from '@/common/decorators/public.decorator';
 import { Request } from 'express';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
@@ -34,7 +27,6 @@ import { UpdateMeDto } from '@/types/auth/update-me.dto';
 import { Roles } from './decorators/roles.decorator';
 import { RolesGuard } from './guards/roles.guard';
 import { RegisterDto } from '@/types/auth/register.dto';
-import { SetPasswordDto } from '@/types/auth/set-password.dto';
 
 
 @ApiTags('Auth')

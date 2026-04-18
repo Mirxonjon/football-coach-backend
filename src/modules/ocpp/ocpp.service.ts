@@ -103,7 +103,7 @@ export class OcppService {
         return {};
     }
 
-    public async handleHeartbeat(stationId: number, payload: any) {
+    public async handleHeartbeat(stationId: number, _payload: any) {
         this.logger.debug(`[ID=${stationId}] Heartbeat`);
         return { currentTime: new Date().toISOString() };
     }
@@ -181,7 +181,7 @@ export class OcppService {
                     data: { quantity: totalVolume, totalAmount: totalVolume * price },
                 });
                 this.frontendGateway.emitSessionMeterUpdated(transactionId, totalVolume, 0, currentSession.totalAmount);
-            } catch (e) {
+            } catch (_e) {
                 this.logger.error(`Error updating fuel session meter for tx ${transactionId}`);
             }
         }

@@ -10,7 +10,6 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import * as Config from '../config/app.config';
 
-import { DefaultStatusEnum } from '@/types/global/constants';
 import { Reflector } from '@nestjs/core';
 
 

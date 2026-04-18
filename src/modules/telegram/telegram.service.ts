@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { UpdateTelegramSettingDto } from '@/types/telegram/update-telegram-setting.dto';
 import { ConfigService } from '@nestjs/config';

@@ -15,15 +15,12 @@ import {
 import {
   ApiBearerAuth,
   ApiOperation,
-  ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
 import { NotificationService } from './notification.service';
 import { RegisterDeviceDto } from './dto/register-device.dto';
 import { SendNotificationDto } from './dto/send-notification.dto';
 import { BroadcastDto } from './dto/broadcast.dto';
-import { AuthGuard } from '@/common/guards/auth.guard';
-import { JwtService } from '@nestjs/jwt';
 import { ListQueryDto } from '@/types/global/dto/list-query.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
