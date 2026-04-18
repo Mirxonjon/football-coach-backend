@@ -18,8 +18,11 @@ export class CardsService {
   }
 
   async create(userId: number, dto: CreateCardDto) {
+    // Card.id is not autoincrement (comes from provider). Generate a fallback unique id until
+    // provider integration lands.
+    const id = Math.floor(Date.now() + Math.random() * 1000);
     const card = await this.prisma.card.create({
-      data: { userId, token: dto.token, last4: dto.last4 },
+      data: { id, userId, token: dto.token, last4: dto.last4 },
     });
     return { id: card.id, last4: card.last4, createdAt: card.createdAt };
   }

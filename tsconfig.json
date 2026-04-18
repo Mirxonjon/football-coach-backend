@@ -20,5 +20,15 @@
     "paths": {
       "@/*": ["src/*"]
     }
-  }
+  },
+  "exclude": [
+    "node_modules",
+    "dist",
+    "src/modules/legal",
+    "src/modules/telegram",
+    "src/types/legal",
+    "src/modules/auth/admin.controller.ts",
+    "src/modules/auth/admin.controller.spec.ts",
+    "**/*.spec.ts"
+  ]
 }

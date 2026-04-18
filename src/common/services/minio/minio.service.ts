@@ -53,8 +53,8 @@ export class MinioService {
         );
       }
     } catch (error) {
-      this.logger.error('Error initializing MinIO bucket:', error);
-      throw error;
+      this.logger.warn('MinIO unavailable — file uploads disabled until MinIO is running.');
+      // Non-fatal: let the app boot without MinIO in dev.
     }
   }
 

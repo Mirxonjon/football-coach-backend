@@ -69,17 +69,18 @@ model User {
   roleId     Int
   role       Role      @relation(fields: [roleId], references: [id])
 
-  sessions      Session[]
-  otpCodes      OtpCode[]
-  cards         Card[]
-  walletTx      WalletTransaction[]
-  subscriptions Subscription[]
-  userBooks     UserBook[]
-  bookProgress  BookProgress[]
-  notifications Notification[]
-  devices       UserDevice[]
-  aiChats       AiChat[]
-  aiRateLimits  AiRateLimit[]
+  sessions       Session[]
+  otpCodes       OtpCode[]
+  cards          Card[]
+  walletTx       WalletTransaction[]
+  subscriptions  Subscription[]
+  userBooks      UserBook[]
+  bookProgress   BookProgress[]
+  lessonProgress LessonProgress[]
+  notifications  Notification[]
+  devices        UserDevice[]
+  aiChats        AiChat[]
+  aiRateLimits   AiRateLimit[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -339,13 +340,30 @@ model TrainingLesson {
   descriptionUz      String
   tacticHintImg      String?
 
-  lessonBlocks LessonBlock[]
+  lessonBlocks   LessonBlock[]
+  lessonProgress LessonProgress[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([trainingCategoryId])
   @@index([sequenceOrder])
+}
+
+model LessonProgress {
+  id                Int            @id @default(autoincrement())
+  userId            Int
+  user              User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lessonId          Int
+  lesson            TrainingLesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  lastBlockSequence Int            @default(0)
+  isCompleted       Boolean        @default(false)
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  @@unique([userId, lessonId])
+  @@index([userId])
+  @@index([lessonId])
 }
 
 model LessonBlock {

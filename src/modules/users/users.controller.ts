@@ -17,9 +17,11 @@ import { AdminUpdateUserDto } from '@/types/users/admin-update-user.dto';
 import { AdminFilterUsersDto } from '@/types/users/admin-filter-users.dto';
 import { Roles } from '@/modules/auth/decorators/roles.decorator';
 import { RolesGuard } from '@/modules/auth/guards/roles.guard';
+import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard';
 
 @ApiTags('Users')
 @ApiBearerAuth()
+@UseGuards(JwtAuthGuard)
 @Controller()
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}

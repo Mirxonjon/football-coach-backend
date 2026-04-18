@@ -10,7 +10,7 @@ const USER_SELECT: Prisma.UserSelect = {
   phone: true,
   firstName: true,
   lastName: true,
-  wasBorn: true,
+  birthDate: true,
   isVerified: true,
   isActive: true,
   roleId: true,
@@ -47,7 +47,7 @@ export class UsersService {
       data: {
         ...(dto.firstName !== undefined && { firstName: dto.firstName }),
         ...(dto.lastName !== undefined && { lastName: dto.lastName }),
-        ...(dto.birthDate !== undefined && { wasBorn: new Date(dto.birthDate) }),
+        ...(dto.birthDate !== undefined && { birthDate: new Date(dto.birthDate) }),
         ...(dto.avatarUrl !== undefined && { avatarUrl: dto.avatarUrl }),
       },
       select: USER_SELECT,

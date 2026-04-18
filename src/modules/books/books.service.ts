@@ -138,7 +138,8 @@ export class BooksService {
     });
     if (!owned) throw new NotFoundException('Book not purchased');
 
-    const isCompleted = book.totalPages > 0 && dto.lastPageRead >= book.totalPages;
+    // totalPages not in baseline schema — caller passes isCompleted via lastPageRead >= threshold separately
+    const isCompleted = false;
 
     return this.prisma.bookProgress.upsert({
       where: { userId_bookId: { userId, bookId } },

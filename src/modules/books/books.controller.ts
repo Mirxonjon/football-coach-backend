@@ -11,11 +11,13 @@ import {
   ParseIntPipe,
   HttpCode,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { BooksService } from './books.service';
 import { Public } from '@/common/decorators/public.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard';
 import { CreateBookCategoryDto } from '@/types/books/create-book-category.dto';
 import { UpdateBookCategoryDto } from '@/types/books/update-book-category.dto';
 import { CreateBookDto } from '@/types/books/create-book.dto';
@@ -27,6 +29,7 @@ import { Request } from 'express';
 
 @ApiTags('Books')
 @ApiBearerAuth()
+@UseGuards(JwtAuthGuard)
 @Controller()
 export class BooksController {
   constructor(private readonly booksService: BooksService) {}

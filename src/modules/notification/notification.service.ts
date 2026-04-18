@@ -33,13 +33,12 @@ export class NotificationService {
 
   async registerDevice(userId: number, fcmToken: string, deviceType: string) {
     return this.prisma.userDevice.upsert({
-      where: { deviceToken: fcmToken },
-      update: { userId, platform: deviceType, isActive: true },
+      where: { fcmToken: fcmToken },
+      update: { userId, deviceType },
       create: {
         userId,
-        deviceToken: fcmToken,
-        platform: deviceType,
-        isActive: true,
+        fcmToken: fcmToken,
+        deviceType,
       },
     });
   }
@@ -102,23 +101,27 @@ export class NotificationService {
 
   async sendToUser(userId: number, payload: NotificationPayload) {
     const devices = await this.prisma.userDevice.findMany({
-      where: { userId, isActive: true },
-      select: { deviceToken: true },
+      where: { userId },
+      select: { fcmToken: true },
     });
 
     await this.prisma.notification.create({
       data: {
         userId,
-        title: payload.title,
-        body: payload.body,
-        type: payload.type,
-        data: payload.data as any,
+        titleUz: payload.title,
+
+        titleRu: payload.title,
+
+        messageUz: payload.body,
+
+        messageRu: payload.body,
+        type: payload.type as any
       },
     });
 
     if (devices.length === 0) return { success: true, sent: 0 };
 
-    const tokens = devices.map((d) => d.deviceToken);
+    const tokens = devices.map((d) => d.fcmToken);
     const res = await this.sendMulticast(
       tokens,
       payload.title,
@@ -130,8 +133,8 @@ export class NotificationService {
 
   async sendToMany(userIds: number[], payload: NotificationPayload) {
     const devices = await this.prisma.userDevice.findMany({
-      where: { userId: { in: userIds }, isActive: true },
-      select: { deviceToken: true },
+      where: { userId: { in: userIds } },
+      select: { fcmToken: true },
     });
 
     await this.prisma.$transaction(
@@ -139,10 +142,14 @@ export class NotificationService {
         this.prisma.notification.create({
           data: {
             userId: uid,
-            title: payload.title,
-            body: payload.body,
-            type: payload.type,
-            data: payload.data as any,
+            titleUz: payload.title,
+
+            titleRu: payload.title,
+
+            messageUz: payload.body,
+
+            messageRu: payload.body,
+            type: payload.type as any
           },
         }),
       ),
@@ -150,7 +157,7 @@ export class NotificationService {
 
     if (devices.length === 0) return { success: true, sent: 0 };
 
-    const tokens = devices.map((d) => d.deviceToken);
+    const tokens = devices.map((d) => d.fcmToken);
     const res = await this.sendMulticast(
       tokens,
       payload.title,
@@ -162,8 +169,8 @@ export class NotificationService {
 
   async broadcast(payload: NotificationPayload) {
     const devices = await this.prisma.userDevice.findMany({
-      where: { isActive: true },
-      select: { deviceToken: true, userId: true },
+      where: {},
+      select: { fcmToken: true, userId: true },
     });
 
     const uniqueUserIds = [...new Set(devices.map((d) => d.userId))];
@@ -173,10 +180,14 @@ export class NotificationService {
         this.prisma.notification.create({
           data: {
             userId: uid,
-            title: payload.title,
-            body: payload.body,
-            type: payload.type,
-            data: payload.data as any,
+            titleUz: payload.title,
+
+            titleRu: payload.title,
+
+            messageUz: payload.body,
+
+            messageRu: payload.body,
+            type: payload.type as any
           },
         }),
       ),
@@ -184,7 +195,7 @@ export class NotificationService {
 
     if (devices.length === 0) return { success: true, sent: 0 };
 
-    const tokens = devices.map((d) => d.deviceToken);
+    const tokens = devices.map((d) => d.fcmToken);
     const res = await this.sendMulticast(
       tokens,
       payload.title,
@@ -245,8 +256,8 @@ export class NotificationService {
       ) {
         try {
           await this.prisma.userDevice.update({
-            where: { deviceToken: tokens[i] },
-            data: { isActive: false },
+            where: { fcmToken: tokens[i] },
+            data: {},
           });
         } catch {}
       }

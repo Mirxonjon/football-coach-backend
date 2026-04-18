@@ -192,50 +192,15 @@ export class AuthService {
 
   // ─── Password forgot / reset ─────────────────────────────────
 
-  async forgotPassword(dto: ForgotPasswordEmailDto) {
-    const user = await this.prisma.user.findUnique({ where: { email: dto.email } });
-    if (!user) return; // don't reveal existence
-
-    const tokenPlain = crypto.randomBytes(32).toString('hex');
-    const tokenHash = await bcrypt.hash(tokenPlain, 12);
-    const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
-
-    await this.prisma.passwordResetToken.create({
-      data: { userId: user.id, token: tokenHash, expiresAt },
-    });
-
-    // TODO: send email with tokenPlain — for now just log in dev
-    if (process.env.NODE_ENV !== 'production') {
-      // eslint-disable-next-line no-console
-      console.log(`[DEV] Password reset token for ${dto.email}: ${tokenPlain}`);
-    }
+  async forgotPassword(_dto: ForgotPasswordEmailDto) {
+    // TODO: add PasswordResetToken model to Prisma schema (not in baseline).
+    // For now, password reset via email is not available; clients should use phone + OTP flow.
+    throw new BadRequestException('Password reset via email is not enabled yet — use phone OTP');
   }
 
-  async resetPassword(dto: ResetPasswordTokenDto) {
-    const now = new Date();
-    const candidates = await this.prisma.passwordResetToken.findMany({
-      where: { expiresAt: { gte: now } },
-      orderBy: { createdAt: 'desc' },
-      take: 50,
-    });
-
-    let matched: { id: number; userId: number } | null = null;
-    for (const c of candidates) {
-      if (await bcrypt.compare(dto.token, c.token)) {
-        matched = { id: c.id, userId: c.userId };
-        break;
-      }
-    }
-    if (!matched) throw new BadRequestException('Invalid or expired reset token');
-
-    const hash = await bcrypt.hash(dto.newPassword, 12);
-    await this.prisma.$transaction([
-      this.prisma.user.update({ where: { id: matched.userId }, data: { password: hash } }),
-      this.prisma.passwordResetToken.delete({ where: { id: matched.id } }),
-      this.prisma.passwordResetToken.deleteMany({
-        where: { userId: matched.userId, expiresAt: { lt: now } },
-      }),
-    ]);
+  async resetPassword(_dto: ResetPasswordTokenDto) {
+    // TODO: add PasswordResetToken model to Prisma schema (not in baseline).
+    throw new BadRequestException('Password reset via email is not enabled yet — use phone OTP');
   }
 
   // ─── Helpers ─────────────────────────────────────────────────

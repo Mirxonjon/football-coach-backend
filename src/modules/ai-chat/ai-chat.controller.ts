@@ -10,15 +10,18 @@ import {
   UseInterceptors,
   UploadedFiles,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import { AiChatService } from './ai-chat.service';
 import { CreateChatDto } from '../../types/ai-chat/create-chat.dto';
 import { SendMessageDto } from '../../types/ai-chat/send-message.dto';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiConsumes, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard';
 
 @ApiTags('AI Chat')
 @ApiBearerAuth()
+@UseGuards(JwtAuthGuard)
 @Controller('ai/chats')
 export class AiChatController {
   constructor(private readonly aiChatService: AiChatService) {}
