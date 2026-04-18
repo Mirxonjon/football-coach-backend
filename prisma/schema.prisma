@@ -62,6 +62,7 @@ model User {
   Notification        Notification[]
   UserDevice          UserDevice[]
   cashierStations     FuelStation[]        @relation("CashierStation")
+  subscriptions       Subscription[]
   telegramSetting     TelegramSetting?
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
@@ -454,4 +455,127 @@ model TelegramSetting {
   updatedAt       DateTime @updatedAt
 
   @@index([userId])
+}
+
+// ==========================================
+// Subscription Domain
+// ==========================================
+
+enum DiscountType {
+  NONE
+  PERCENTAGE
+  FIXED_PRICE
+}
+
+model SubscriptionPlan {
+  id               Int            @id @default(autoincrement())
+  titleUz          String         @db.VarChar(100)
+  titleRu          String         @db.VarChar(100)
+  descriptionUz    String
+  descriptionRu    String
+  durationDays     Int
+  discountType     DiscountType   @default(NONE)
+  basePrice        Float
+  discountPercent  Int            @default(0)
+  fixedDiscountPrice Float?
+  isActive         Boolean        @default(true)
+  subscriptions    Subscription[]
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  @@index([isActive])
+}
+
+model Subscription {
+  id                   Int              @id @default(autoincrement())
+  userId               Int
+  user                 User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  startDate            DateTime
+  endDate              DateTime
+  isActive             Boolean          @default(true)
+  subscriptionsPlansId Int
+  subscriptionsPlan    SubscriptionPlan @relation(fields: [subscriptionsPlansId], references: [id])
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+
+  @@index([userId])
+  @@index([subscriptionsPlansId])
+  @@index([isActive])
+}
+
+// ==========================================
+// Training Domain
+// ==========================================
+
+enum BlockType {
+  TITLE
+  TEXT
+  VIDEO
+  IMAGE
+  FILE
+  HINT
+}
+
+model AgeCategory {
+  id                 Int                @id @default(autoincrement())
+  titleUz            String             @db.VarChar(200)
+  titleRu            String             @db.VarChar(200)
+  minAge             Int
+  maxAge             Int
+  iconUrl            String?
+  trainingCategories TrainingCategory[]
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+}
+
+model TrainingCategory {
+  id              Int              @id @default(autoincrement())
+  titleUz         String           @db.VarChar(200)
+  titleRu         String           @db.VarChar(200)
+  ageCategoriesId Int
+  ageCategory     AgeCategory      @relation(fields: [ageCategoriesId], references: [id])
+  descriptionUz   String
+  descriptionRu   String
+  imageUrl        String?
+  trainingLessons TrainingLesson[]
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@index([ageCategoriesId])
+}
+
+model TrainingLesson {
+  id                 Int              @id @default(autoincrement())
+  trainingCategoryId Int
+  trainingCategory   TrainingCategory @relation(fields: [trainingCategoryId], references: [id])
+  titleUz            String           @db.VarChar(200)
+  titleRu            String           @db.VarChar(200)
+  videoUrl           String?
+  duration           Int?
+  sequenceOrder      Int
+  descriptionRu      String
+  descriptionUz      String
+  tacticHintImg      String?
+  lessonBlocks       LessonBlock[]
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  @@index([trainingCategoryId])
+  @@index([sequenceOrder])
+}
+
+model LessonBlock {
+  id            Int            @id @default(autoincrement())
+  lessonId      Int
+  lesson        TrainingLesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  blockType     BlockType
+  contentUz     String
+  contentRu     String
+  duration      Int?
+  sequenceOrder Int
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@index([lessonId])
+  @@index([sequenceOrder])
 }
