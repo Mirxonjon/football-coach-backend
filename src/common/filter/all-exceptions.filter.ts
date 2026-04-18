@@ -7,9 +7,8 @@ import {
   Logger,
   BadRequestException,
 } from '@nestjs/common';
+import { ThrottlerException } from '@nestjs/throttler';
 import { Response } from 'express';
-import { MongoError } from 'mongodb';
-import { Error as MongooseError } from 'mongoose';
 
 @Catch()
 export class AllExceptionFilter implements ExceptionFilter {
@@ -19,28 +18,27 @@ export class AllExceptionFilter implements ExceptionFilter {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
 
-    this.logger.debug('Exception error:', exception);
-
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
+    let code = 'INTERNAL_ERROR';
     let message = 'Internal Server Error';
+    let details: Record<string, unknown> | undefined;
 
-    if (exception instanceof HttpException) {
+    if (exception instanceof ThrottlerException) {
+      status = HttpStatus.TOO_MANY_REQUESTS;
+      code = 'RATE_LIMITED';
+      message = 'Too many requests, please try again later';
+    } else if (exception instanceof HttpException) {
       status = exception.getStatus();
       const res = exception.getResponse();
-
-      this.logger.debug(`Exception response: ${JSON.stringify(res)}`);
 
       if (
         exception instanceof BadRequestException &&
         typeof res !== 'string' &&
         Array.isArray((res as any).message)
       ) {
-        const validationErrors = (res as any).message;
-        message = this.formatValidationErrorsToMessage(validationErrors);
-
-        this.logger.debug(
-          `Validation errors: ${JSON.stringify(validationErrors)}`
-        );
+        code = 'VALIDATION_ERROR';
+        message = (res as any).message[0];
+        details = { errors: (res as any).message };
       } else {
         message =
           typeof res === 'string'
@@ -48,78 +46,42 @@ export class AllExceptionFilter implements ExceptionFilter {
             : Array.isArray((res as any).message)
               ? (res as any).message[0]
               : (res as any).message || 'Bad request';
+        code = (typeof res !== 'string' && (res as any).error)
+          ? String((res as any).error).toUpperCase().replace(/\s+/g, '_')
+          : this.statusToCode(status);
       }
-    } else if (
-      exception instanceof MongoError ||
-      exception instanceof MongooseError
-    ) {
-      status = this.getMongoErrorStatus(exception);
-      message = this.getMongoErrorMessage(exception);
     } else if (exception instanceof Error) {
       message = exception.message;
       this.logger.error(
         `Unhandled exception: ${exception.message}`,
-        exception.stack
+        exception.stack,
       );
     } else {
       this.logger.error('Unknown error type:', exception);
     }
 
-    
-    const errorResponse = {
-      status_code: status,
-      message,
+    const errorResponse: Record<string, unknown> = {
+      error: {
+        code,
+        message,
+        ...(details && { details }),
+      },
     };
 
-    this.logger.debug(`Error response: ${JSON.stringify(errorResponse)}`);
     response.status(status).json(errorResponse);
   }
 
-  private formatValidationErrorsToMessage(validationErrors: string[]): string {
-    if (!validationErrors || validationErrors.length === 0) {
-      return 'Validation failed';
-    }
-
-    return validationErrors[0];
-  }
-
-  private getMongoErrorStatus(exception: MongoError | MongooseError): number {
-    if ('code' in exception) {
-      switch (exception.code) {
-        case 11000:
-          return HttpStatus.CONFLICT;
-        case 121:
-          return HttpStatus.BAD_REQUEST;
-        default:
-          return HttpStatus.BAD_REQUEST;
-      }
-    }
-    if (exception instanceof MongooseError.CastError)
-      return HttpStatus.BAD_REQUEST;
-    if (exception instanceof MongooseError.ValidationError)
-      return HttpStatus.UNPROCESSABLE_ENTITY;
-    return HttpStatus.INTERNAL_SERVER_ERROR;
-  }
-
-  private getMongoErrorMessage(exception: MongoError | MongooseError): string {
-    if ('code' in exception) {
-      if (exception.code === 11000 && 'keyValue' in exception) {
-        const duplicateFields = Object.keys(exception.keyValue);
-        const fieldValues = Object.values(exception.keyValue).join(', ');
-        return `A record with ${duplicateFields.join(', ')} '${fieldValues}' already exists`;
-      }
-      if (exception.code === 121) return `Document validation failed`;
-    }
-
-    if (exception instanceof MongooseError.ValidationError) {
-      const firstError = Object.values(exception.errors)[0];
-      return firstError?.message || 'Validation failed';
-    }
-
-    if (exception instanceof MongooseError.CastError) {
-      return `Invalid ${exception.kind} value '${exception.value}' for field '${exception.path}'`;
-    }
-
-    return 'Database operation failed';
+  private statusToCode(status: number): string {
+    const map: Record<number, string> = {
+      400: 'BAD_REQUEST',
+      401: 'UNAUTHORIZED',
+      403: 'FORBIDDEN',
+      404: 'NOT_FOUND',
+      409: 'CONFLICT',
+      422: 'UNPROCESSABLE_ENTITY',
+      429: 'RATE_LIMITED',
+      500: 'INTERNAL_ERROR',
+    };
+    return map[status] || 'UNKNOWN_ERROR';
   }
 }

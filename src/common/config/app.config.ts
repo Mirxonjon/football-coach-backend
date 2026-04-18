@@ -74,8 +74,9 @@ export const ValidatorConfig = {
   transform: true,
   stopAtFirstError: true,
   whitelist: true,
+  forbidNonWhitelisted: true,
   transformOptions: {
-    enableImplicitConversion: true, // 🔥 SHART
+    enableImplicitConversion: true,
   },
 };
 

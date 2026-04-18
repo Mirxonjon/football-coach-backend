@@ -16,6 +16,7 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { SendOtpDto } from '@/types/auth/send-otp.dto';
 import { VerifyOtpDto } from '@/types/auth/verify-otp.dto';
@@ -44,6 +45,7 @@ export class AuthController {
 
   @Public()
   @Post('register')
+  @Throttle({ short: { ttl: 60000, limit: 5 } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Register by phone - send OTP' })
   @ApiBody({ type: RegisterDto })
@@ -53,6 +55,7 @@ export class AuthController {
 
   @Public()
   @Post('verify-otp')
+  @Throttle({ short: { ttl: 60000, limit: 10 } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'STEP 2 — Verify OTP and issue registrationToken' })
   @ApiBody({ type: VerifyOtpDto })
@@ -114,6 +117,7 @@ export class AuthController {
 
   @Public()
   @Post('refresh')
+  @Throttle({ short: { ttl: 60000, limit: 10 } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Refresh access token using refresh token' })
   @ApiBody({ type: RefreshDto })
