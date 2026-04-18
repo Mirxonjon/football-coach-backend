@@ -5,10 +5,10 @@ export class RegisterDeviceDto {
   @ApiProperty({ example: 'fcm_device_token_string' })
   @IsString()
   @IsNotEmpty()
-  deviceToken: string;
+  fcmToken: string;
 
   @ApiProperty({ example: 'ANDROID', enum: ['ANDROID', 'IOS'] })
   @IsString()
   @IsIn(['ANDROID', 'IOS'])
-  platform: string;
+  deviceType: string;
 }
