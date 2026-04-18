@@ -7,145 +7,91 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum DiscountType {
+  NONE
+  PERCENTAGE
+  FIXED_PRICE
+}
+
 enum PaymentStatus {
   PENDING
   SUCCESS
   FAILED
 }
 
-enum PaymentMethod {
-  CLICK
-  PAYME
-  CARD
+enum NotificationType {
+  SYSTEM
+  LESSON
+  BOOK
+  SUBSCRIPTION
+  AI_CHAT
 }
 
-enum Unit {
-  LITRE
-  M3
-  KWH
-  KG
+enum BlockType {
+  TITLE
+  TEXT
+  VIDEO
+  IMAGE
+  FILE
+  HINT
 }
 
-enum FuelCategory {
-  PETROL
-  GAS
-  PROPANE
-  ELECTRICITY
+enum BookCategoryType {
+  BOOK
+  KONSPEKT
+}
+
+enum AiMessageRole {
+  user
+  assistant
 }
 
 model Role {
-  id    Int    @id @default(autoincrement())
-  name  String @unique
-  users User[]
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  users     User[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model User {
-  id                  Int                  @id @default(autoincrement())
-  phone               String               @unique
-  password            String?
-  firstName           String?
-  lastName            String?
-  wasBorn             DateTime?
-  isVerified          Boolean              @default(false)
-  roleId              Int
-  role                Role                 @relation(fields: [roleId], references: [id])
-  sessions            Session[]
-  otpCodes            OtpCode[]
-  userCars            UserCar[]
-  Cars                Car[]
-  fuelSessions        FuelSession[]
-  resetTokens         PasswordResetToken[]
-  registrationTokens  RegistrationToken[]
-  cards               Card[]
-  paymentTransactions PaymentTransaction[]
-  fuelStationLikes    FuelStationLike[]
-  Notification        Notification[]
-  UserDevice          UserDevice[]
-  cashierStations     FuelStation[]        @relation("CashierStation")
-  telegramSetting     TelegramSetting?
-  createdAt           DateTime             @default(now())
-  updatedAt           DateTime             @updatedAt
-}
+  id         Int       @id @default(autoincrement())
+  phone      String    @unique
+  email      String?   @unique
+  password   String?
+  firstName  String?
+  lastName   String?
+  birthDate  DateTime?
+  googleId   String?   @unique
+  avatarUrl  String?
+  isVerified Boolean   @default(false)
+  isActive   Boolean   @default(true)
+  roleId     Int
+  role       Role      @relation(fields: [roleId], references: [id])
 
-model OtpCode {
-  id            Int      @id @default(autoincrement())
-  code          String
-  phone         String
-  userId        Int?
-  user          User?    @relation(fields: [userId], references: [id])
-  expiresAt     DateTime
-  isUsed        Boolean  @default(false)
-  attemptsCount Int      @default(0)
-  createdAt     DateTime @default(now())
+  sessions      Session[]
+  otpCodes      OtpCode[]
+  cards         Card[]
+  walletTx      WalletTransaction[]
+  subscriptions Subscription[]
+  userBooks     UserBook[]
+  bookProgress  BookProgress[]
+  notifications Notification[]
+  devices       UserDevice[]
+  aiChats       AiChat[]
+  aiRateLimits  AiRateLimit[]
 
-  @@index([phone])
-  @@index([userId])
-}
-
-model RegistrationToken {
-  id        Int      @id @default(autoincrement())
-  userId    Int
-  user      User     @relation(fields: [userId], references: [id])
-  token     String // hashed
-  expiresAt DateTime
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  @@index([userId])
-}
-
-model PasswordResetToken {
-  id        Int      @id @default(autoincrement())
-  userId    Int
-  user      User     @relation(fields: [userId], references: [id])
-  token     String // hashed
-  expiresAt DateTime
-  createdAt DateTime @default(now())
-
-  @@index([userId])
-}
-
-model Car {
-  id          Int       @id @default(autoincrement())
-  createdById Int?
-  createdBy   User?     @relation(fields: [createdById], references: [id])
-  brand       String
-  model       String
-  year        Int?
-  imageUrl    String?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  userCars    UserCar[]
-
-  @@unique([brand, model, year])
-  @@index([brand])
-  @@index([model])
-  @@index([year])
-  @@index([createdById])
-}
-
-model UserCar {
-  id          Int      @id @default(autoincrement())
-  userId      Int
-  carId       Int
-  plateNumber String?  @unique
-  vin         String?  @unique
-  color       String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  user         User          @relation(fields: [userId], references: [id])
-  car          Car           @relation(fields: [carId], references: [id])
-  fuelSessions FuelSession[]
-
-  @@index([userId])
-  @@index([carId])
+  @@index([roleId])
 }
 
 model Session {
   id           Int      @id @default(autoincrement())
   userId       Int
-  user         User     @relation(fields: [userId], references: [id])
-  refreshToken String // store hashed
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshToken String
   ipAddress    String?
   userAgent    String?
   expiresAt    DateTime
@@ -153,305 +99,319 @@ model Session {
   updatedAt    DateTime @updatedAt
 
   @@index([userId])
+  @@index([expiresAt])
 }
 
-enum ConnectorStatus {
-  AVAILABLE
-  OCCUPIED
-  OUT_OF_SERVICE
-}
-
-enum SessionStatus {
-  PENDING
-  CONFIRMED
-  DISPENSING
-  COMPLETED
-  CANCELLED
-}
-
-enum PayoutStatus {
-  PENDING
-  SUCCESS
-  FAILED
-}
-
-model Operator {
-  id           Int              @id @default(autoincrement())
-  title        String
-  color        String?
-  contact      String?
-  bankName     String?
-  bankAccount  String?
-  bankMfo      String?
-  fuelStations FuelStation[]
-  payouts      OperatorPayout[]
-  createdAt    DateTime         @default(now())
-  updatedAt    DateTime         @updatedAt
-
-  @@index([title])
-}
-
-model FuelStation {
-  id               Int               @id @default(autoincrement())
-  operatorId       Int
-  operator         Operator          @relation(fields: [operatorId], references: [id])
-  title            String
-  address          String?
-  latitude         Float
-  longitude        Float
-  isActive         Boolean           @default(true)
-  image            String?
-  workingHours     String?
-  fuelPumps        FuelPump[]
-  fuelStationLikes FuelStationLike[]
-  fuelSessions     FuelSession[]
-  cashiers         User[]              @relation("CashierStation")
-  createdAt        DateTime            @default(now())
-  updatedAt        DateTime            @updatedAt
-
-  @@index([operatorId])
-}
-
-model FuelPump {
-  id             Int                 @id @default(autoincrement())
-  stationId      Int
-  fuelStation    FuelStation         @relation(fields: [stationId], references: [id])
-  fuelPumpNumber Int                 @default(1)
-  status         ConnectorStatus     @default(AVAILABLE)
-  fuels          FuelPumpFuel[]
-  fuelSessions   FuelSession[]
-  statusLogs     FuelPumpStatusLog[]
-  qrCode         String?             @unique
-  createdAt      DateTime            @default(now())
-  updatedAt      DateTime            @updatedAt
-
-  @@unique([stationId, fuelPumpNumber])
-  @@index([stationId])
-  @@index([qrCode])
-}
-
-model FuelType {
+model OtpCode {
   id        Int      @id @default(autoincrement())
-  name      String   @unique
-  octane    String?
-  unit      Unit         @default(LITRE)
-  category  FuelCategory @default(PETROL)
-  picture   String?
+  code      String
+  userId    Int?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  email     String?
+  phone     String?
+  expiresAt DateTime
+  isUsed    Boolean  @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  fuelPumpFuels FuelPumpFuel[]
-  fuelSessions  FuelSession[]
-}
-
-model FuelPumpStatusLog {
-  id         Int             @id @default(autoincrement())
-  fuelPumpId Int
-  fuelPump   FuelPump        @relation(fields: [fuelPumpId], references: [id])
-  status     ConnectorStatus
-  timestamp  DateTime        @default(now())
-  createdAt  DateTime        @default(now())
-  updatedAt  DateTime        @updatedAt
-
-  @@index([fuelPumpId])
-}
-
-model FuelPumpFuel {
-  id           Int       @id @default(autoincrement())
-  fuelPumpId   Int
-  fuelPump     FuelPump  @relation(fields: [fuelPumpId], references: [id])
-  fuelTypeId   Int
-  fuelType     FuelType  @relation(fields: [fuelTypeId], references: [id])
-  price        Float
-  nozzleNumber Int?
-  endTime      DateTime?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-
-  @@index([fuelPumpId])
-  @@index([fuelTypeId])
-}
-
-model FuelSession {
-  id            Int           @id @default(autoincrement())
-  userId        Int
-  user          User          @relation(fields: [userId], references: [id])
-  fuelStationId Int
-  fuelStation   FuelStation   @relation(fields: [fuelStationId], references: [id])
-  fuelPumpId    Int
-  fuelPump      FuelPump      @relation(fields: [fuelPumpId], references: [id])
-  fuelTypeId    Int
-  fuelType      FuelType      @relation(fields: [fuelTypeId], references: [id])
-  userCarId     Int?
-  userCar       UserCar?      @relation(fields: [userCarId], references: [id])
-  quantity      Float         @default(0) // replaces volume
-  unit          Unit          @default(LITRE)
-  pricePerUnit  Float         @default(0)
-  totalAmount   Float         @default(0) // replaces cost
-  status        SessionStatus @default(PENDING)
-  startTime     DateTime      @default(now())
-  endTime       DateTime?
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
-
-  payment   PaymentTransaction? @relation(fields: [paymentId], references: [id])
-  paymentId Int?                @unique
-
   @@index([userId])
-  @@index([fuelStationId])
-  @@index([fuelPumpId])
-  @@index([fuelTypeId])
-  @@index([userCarId])
+  @@index([phone])
+  @@index([email])
 }
 
-model PaymentTransaction {
-  id           Int            @id @default(autoincrement())
-  cardId       Int
-  card         Card           @relation(fields: [cardId], references: [id])
-  amount       Float
-  userId       Int
-  user         User           @relation(fields: [userId], references: [id])
-  provider     String?
-  method       PaymentMethod?
-  status       PaymentStatus  @default(PENDING)
-  externalId   String?        @unique
-  errorCode    String?
-  errorMessage String?
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
-
-  FuelSession FuelSession?
-
-  @@index([userId])
-  @@index([cardId])
-}
-
-model OperatorPayout {
-  id         Int          @id @default(autoincrement())
-  operatorId Int
-  operator   Operator     @relation(fields: [operatorId], references: [id])
-  amount     Decimal
-  currency   String       @default("UZS")
-  status     PayoutStatus @default(PENDING)
-  periodFrom DateTime?
-  periodTo   DateTime?
-  paidAt     DateTime?
-  createdAt  DateTime     @default(now())
-  updatedAt  DateTime     @updatedAt
-
-  @@index([operatorId])
-}
-
-
-
-
-model LegalDocument {
-  id       Int               @id @default(autoincrement())
-  type     LegalDocumentType
-  version  String
-  isActive Boolean           @default(true)
-
-  translations LegalTranslation[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([type])
-}
-
-model LegalTranslation {
+model UserDevice {
   id         Int      @id @default(autoincrement())
-  documentId Int
-  language   Language
-  title      String
-  content    String   @db.Text
+  userId     Int
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fcmToken   String   @unique
+  deviceType String   @db.VarChar(20)
+  lastActive DateTime @default(now())
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
-  document LegalDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
-
-  @@unique([documentId, language])
-  @@index([language])
-}
-
-enum LegalDocumentType {
-  TERMS
-  PRIVACY
-}
-
-enum Language {
-  UZ
-  RU
-  EN
-}
-
-model FuelStationLike {
-  id            Int @id @default(autoincrement())
-  userId        Int
-  fuelStationId Int
-
-  user        User        @relation(fields: [userId], references: [id])
-  fuelStation FuelStation @relation(fields: [fuelStationId], references: [id])
-
-  createdAt DateTime @default(now())
-
-  @@unique([userId, fuelStationId])
-  @@index([fuelStationId])
   @@index([userId])
 }
 
 model Notification {
-  id        Int      @id @default(autoincrement())
-  userId    Int?
-  title     String
-  body      String
-  type      String
-  data      Json?
-  isRead    Boolean  @default(false)
-  createdAt DateTime @default(now())
-
-  user User? @relation(fields: [userId], references: [id])
+  id        Int              @id @default(autoincrement())
+  userId    Int
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      NotificationType
+  titleUz   String           @db.VarChar(200)
+  titleRu   String           @db.VarChar(200)
+  messageUz String
+  messageRu String
+  relatedId Int?
+  isRead    Boolean          @default(false)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
 
   @@index([userId])
+  @@index([type])
+  @@index([isRead])
 }
-
-model UserDevice {
-  id          Int      @id @default(autoincrement())
-  userId      Int
-  deviceToken String   @unique
-  platform    String // ANDROID | IOS
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-
-  user User @relation(fields: [userId], references: [id])
-}
-
-// ==========================================
-// Click Integration Models
-// ==========================================
 
 model Card {
-  id        Int      @id @default(autoincrement())
-  userId    Int
-  user      User     @relation(fields: [userId], references: [id])
-  token     String   @unique
-  last4     String // e.g. 3456
+  id        Int      @id
+  userId    Int      @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String
+  last4     String   @db.VarChar(4)
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  PaymentTransaction PaymentTransaction[]
+  walletTx WalletTransaction[]
+}
+
+model WalletTransaction {
+  id                   Int               @id @default(autoincrement())
+  cardId               Int?
+  card                 Card?             @relation(fields: [cardId], references: [id])
+  userId               Int
+  user                 User              @relation(fields: [userId], references: [id])
+  amount               Float
+  subscriptionsPlansId Int?
+  subscriptionsPlan    SubscriptionPlan? @relation(fields: [subscriptionsPlansId], references: [id])
+  provider             String?
+  status               PaymentStatus     @default(PENDING)
+  externalId           String?
+  errorCode            String?
+  errorMessage         String?
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+
+  @@index([userId])
+  @@index([cardId])
+  @@index([subscriptionsPlansId])
+  @@index([status])
+  @@index([externalId])
+}
+
+model SubscriptionPlan {
+  id                 Int          @id @default(autoincrement())
+  titleUz            String       @db.VarChar(100)
+  titleRu            String       @db.VarChar(100)
+  descriptionUz      String
+  descriptionRu      String
+  durationDays       Int
+  discountType       DiscountType @default(NONE)
+  basePrice          Float
+  discountPercent    Int          @default(0)
+  fixedDiscountPrice Float?
+  isActive           Boolean      @default(true)
+
+  subscriptions Subscription[]
+  walletTx      WalletTransaction[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive])
+}
+
+model Subscription {
+  id                   Int              @id @default(autoincrement())
+  userId               Int
+  user                 User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  startDate            DateTime
+  endDate              DateTime
+  isActive             Boolean          @default(true)
+  subscriptionsPlansId Int
+  subscriptionsPlan    SubscriptionPlan @relation(fields: [subscriptionsPlansId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([subscriptionsPlansId])
+  @@index([isActive])
+}
+
+model BookCategory {
+  id           Int              @id @default(autoincrement())
+  titleUz      String           @db.VarChar(200)
+  titleRu      String           @db.VarChar(200)
+  categoryType BookCategoryType
+  books        Book[]
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+}
+
+model Book {
+  id                 Int          @id @default(autoincrement())
+  bookCategoryId     Int
+  bookCategory       BookCategory @relation(fields: [bookCategoryId], references: [id])
+  titleUz            String       @db.VarChar(200)
+  titleRu            String       @db.VarChar(200)
+  fileUrl            String
+  basePrice          Float
+  discountType       DiscountType @default(NONE)
+  discountPercent    Int          @default(0)
+  fixedDiscountPrice Float?
+  coverImageUrl      String?
+  descriptionRu      String
+  descriptionUz      String
+  tacticHintImg      String?
+
+  userBooks    UserBook[]
+  bookProgress BookProgress[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([bookCategoryId])
+}
+
+model UserBook {
+  id            Int      @id @default(autoincrement())
+  userId        Int
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bookId        Int
+  book          Book     @relation(fields: [bookId], references: [id])
+  transactionId Int?
+  acquiredAt    DateTime @default(now())
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([userId, bookId])
+  @@index([userId])
+  @@index([bookId])
+}
+
+model BookProgress {
+  id           Int      @id @default(autoincrement())
+  userId       Int
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bookId       Int
+  book         Book     @relation(fields: [bookId], references: [id])
+  lastPageRead Int      @default(0)
+  isCompleted  Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([userId, bookId])
+  @@index([userId])
+  @@index([bookId])
+}
+
+model AgeCategory {
+  id                 Int                @id @default(autoincrement())
+  titleUz            String             @db.VarChar(200)
+  titleRu            String             @db.VarChar(200)
+  minAge             Int
+  maxAge             Int
+  iconUrl            String?
+  trainingCategories TrainingCategory[]
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+}
+
+model TrainingCategory {
+  id              Int         @id @default(autoincrement())
+  titleUz         String      @db.VarChar(200)
+  titleRu         String      @db.VarChar(200)
+  ageCategoriesId Int
+  ageCategory     AgeCategory @relation(fields: [ageCategoriesId], references: [id])
+  descriptionUz   String
+  descriptionRu   String
+  imageUrl        String?
+
+  trainingLessons TrainingLesson[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([ageCategoriesId])
+}
+
+model TrainingLesson {
+  id                 Int              @id @default(autoincrement())
+  trainingCategoryId Int
+  trainingCategory   TrainingCategory @relation(fields: [trainingCategoryId], references: [id])
+  titleUz            String           @db.VarChar(200)
+  titleRu            String           @db.VarChar(200)
+  videoUrl           String?
+  duration           Int?
+  sequenceOrder      Int
+  descriptionRu      String
+  descriptionUz      String
+  tacticHintImg      String?
+
+  lessonBlocks LessonBlock[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([trainingCategoryId])
+  @@index([sequenceOrder])
+}
+
+model LessonBlock {
+  id            Int            @id @default(autoincrement())
+  lessonId      Int
+  lesson        TrainingLesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  blockType     BlockType
+  contentUz     String
+  contentRu     String
+  duration      Int?
+  sequenceOrder Int
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([lessonId])
+  @@index([sequenceOrder])
+}
+
+model AiChat {
+  id        Int         @id @default(autoincrement())
+  userId    Int
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String      @db.VarChar(200)
+  messages  AiMessage[]
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
 
   @@index([userId])
 }
 
-model TelegramSetting {
-  id              Int      @id @default(autoincrement())
-  userId          Int      @unique
-  user            User     @relation(fields: [userId], references: [id])
-  telegramId      String?
-  telegramGroupId String?
-  isActive        Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+model AiMessage {
+  id          Int              @id @default(autoincrement())
+  chatId      Int
+  chat        AiChat           @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  role        AiMessageRole
+  messageText String
+  images      AiMessageImage[]
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
 
+  @@index([chatId])
+}
+
+model AiMessageImage {
+  id        Int       @id @default(autoincrement())
+  messageId Int
+  message   AiMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  imageUrl  String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([messageId])
+}
+
+model AiRateLimit {
+  id           Int      @id @default(autoincrement())
+  userId       Int
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ipAddress    String   @db.VarChar(45)
+  requestCount Int      @default(0)
+  lastRequest  DateTime @default(now())
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([userId, ipAddress])
   @@index([userId])
+  @@index([ipAddress])
 }
