@@ -1,117 +1,54 @@
-# Security Review — Phase 1.3 Migration Safety
+# Security Review — Phase 4
 
-**Reviewer:** Vault (DevSecOps)
-**Date:** 2026-04-19
-**Scope:** `prisma/schema.prisma` + auth service layer PII handling
+**Date:** 2026-04-19  
+**Reviewer:** Vault (DevSecOps)  
+**Scope:** Auth, Payments (Click), AI config, global middleware
+
+---
+
+## CRITICAL — Fixed
+
+| # | File | Issue | Fix |
+|---|------|-------|-----|
+| 1 | `auth.service.ts:175` | `console.log(dto.password, user.password)` — plaintext password + hash logged | Removed |
+| 2 | `sms.service.ts:20` | `console.log(email, password)` — Eskiz SMS provider credentials logged | Removed |
+| 3 | `auth.guard.ts:59` | `console.log(payload, token)` — raw JWT logged on every authenticated request | Removed |
+| 4 | `click.service.ts:312` | Auth headers + card_token logged in Click payment request | Redacted to URL-only log |
+| 5 | `click.service.ts:320-322` | `console.log(data)` — full Click payment response logged | Removed |
+| 6 | `click.service.ts:205` | Full card registration response JSON logged | Redacted to error_code only |
+| 7 | `sms.service.ts:84,91` | Debug `console.log` of phone numbers | Removed |
+
+## HIGH — Fixed
+
+| # | File | Issue | Fix |
+|---|------|-------|-----|
+| 8 | `otp.service.ts:40` | OTP codes stored **plaintext** in DB | Now bcrypt-hashed (cost 10); verify uses `bcrypt.compare` |
+| 9 | `otp.service.ts:32` | Hardcoded test backdoor: phone `+998987654321` always gets OTP `12345` | Removed entirely |
+| 10 | `app.config.ts:16` | CORS fallback `'*'` with `credentials: true` | Changed default to `http://localhost:3000` |
+
+## MEDIUM — Warning Only (no code changes)
+
+| # | File | Issue | Recommendation |
+|---|------|-------|----------------|
+| 11 | `app.config.ts:83` | `JWT_SECRET_KEY` falls back to `'secret-key'` | Remove fallback; crash on missing secret in production |
+| 12 | `app.config.ts:33-34` | MinIO `accessKey`/`secretKey` fall back to `'admin'` | Remove fallback or use env-only |
+| 13 | `click.service.ts:214-222` | Card tokens stored plaintext in `Card.token` column | Encrypt at rest (AES-256) or use Click's vault reference instead |
+| 14 | `app.module.ts` | No global `APP_GUARD` for `AuthGuard` — easy to forget auth on new routes | Register `AuthGuard` globally + use `@Public()` decorator for open routes |
+| 15 | `auth.service.ts:141-155` | In-memory rate limiter (`loginRateMap`) resets on restart, not cluster-safe | Add `@nestjs/throttler` with Redis store |
+| 16 | `app.module.ts` | No `ThrottlerModule` — no global rate limiting | Install `@nestjs/throttler`, register globally, apply stricter limits on auth + payment endpoints |
+
+## LOW — Warning Only
+
+| # | File | Issue | Recommendation |
+|---|------|-------|----------------|
+| 17 | `app.config.ts:90` | Proxy token falls back to `'token'` | Remove fallback |
+| 18 | AI config | `openAIConfig` loaded but no AI module exists yet | When implemented: sanitize prompts, never interpolate user input directly, load key from env only (already configured) |
 
 ---
 
 ## Summary
 
-| # | Severity | Finding | Status |
-|---|----------|---------|--------|
-| 1 | CRITICAL | OTP codes stored in plaintext in DB | BLOCKS MERGE |
-| 2 | CRITICAL | OTP code leaked in API response | BLOCKS MERGE |
-| 3 | CRITICAL | Hardcoded test phone/OTP in production code | BLOCKS MERGE |
-| 4 | MEDIUM  | Missing `@@index([userId])` on `UserDevice` | WARNING |
-| 5 | OK      | All FK columns have `@@index` | PASS |
-| 6 | OK      | Cascade rules are safe | PASS |
-| 7 | OK      | password, refreshToken, registrationToken, resetToken all bcrypt-hashed | PASS |
-
----
-
-## CRITICAL Findings (block merge)
-
-### 1. OTP codes stored in plaintext
-
-**File:** `src/modules/auth/otp.service.ts:40-42`
-
-The `OtpCode.code` field is written as a raw string. Any DB read (backup, SQL injection, insider) exposes all active OTP codes. The schema comment says `// hashed` for tokens but `OtpCode.code` has no such annotation.
-
-**Required fix:** Hash OTP with bcrypt (or SHA-256 + constant-time compare since OTPs are short-lived) before persisting. Compare using `bcrypt.compare()` on verification.
-
-### 2. OTP code returned in API response
-
-**File:** `src/modules/auth/auth.service.ts:121`
-
-```typescript
-return { message: 'OTP sent', code };
-```
-
-The `requestLoginOtp` method returns the raw OTP code in the HTTP response body. This defeats the purpose of OTP entirely — any client can read the code without access to the phone.
-
-**Required fix:** Remove `code` from the response. Return only `{ message: 'OTP sent' }`. If needed for dev/staging, gate behind `NODE_ENV !== 'production'`.
-
-### 3. Hardcoded test phone + OTP
-
-**File:** `src/modules/auth/otp.service.ts:32-33`
-
-```typescript
-if (phone === '+998987654321') {
-  code = '12345';
-}
-```
-
-A well-known test number with a static OTP is an open backdoor in production. Attackers can authenticate as any user who registers with this phone number.
-
-**Required fix:** Gate behind `NODE_ENV !== 'production'` or remove entirely. Use environment variable for test numbers if needed in staging.
-
----
-
-## MEDIUM Findings (warning only, no code change)
-
-### 4. Missing index on `UserDevice.userId`
-
-**File:** `prisma/schema.prisma:425` — `UserDevice` model
-
-The `userId` FK has no `@@index([userId])`. Queries filtering devices by user will table-scan.
-
-**Recommended:** Add `@@index([userId])` to `UserDevice`.
-
----
-
-## PASS Items
-
-### 5. FK index coverage
-
-All other FK columns have corresponding `@@index` directives:
-- `OtpCode`: `@@index([phone])`, `@@index([userId])`
-- `RegistrationToken`, `PasswordResetToken`, `Session`: `@@index([userId])`
-- `Car`: `@@index([createdById])`
-- `UserCar`: `@@index([userId])`, `@@index([carId])`
-- `FuelStation`: `@@index([operatorId])`
-- `FuelPump`: `@@index([stationId])`
-- `FuelPumpStatusLog`: `@@index([fuelPumpId])`
-- `FuelPumpFuel`: `@@index([fuelPumpId])`, `@@index([fuelTypeId])`
-- `FuelSession`: all five FK columns indexed
-- `PaymentTransaction`: `@@index([userId])`, `@@index([cardId])`
-- `OperatorPayout`: `@@index([operatorId])`
-- `Card`: `@@index([userId])`
-- `TelegramSetting`: `@@index([userId])`
-- `Notification`: `@@index([userId])`
-- `FuelStationLike`: `@@index([userId])`, `@@index([fuelStationId])`
-- `LegalTranslation`: `@@index([language])` (FK covered by `@@unique`)
-
-### 6. Cascade rules
-
-Only one explicit cascade exists: `LegalTranslation → LegalDocument (onDelete: Cascade)` — correct, translations are owned content.
-
-All other relations use Prisma's default behavior (error on delete if referenced), which means:
-- Deleting a `User` with active sessions/cards/etc. will fail — **correct**, prevents accidental data loss.
-- `PaymentTransaction` has no cascade from any parent — **correct**, historical financial records preserved.
-- `FuelSession` has no cascade — **correct**.
-
-### 7. PII hashing
-
-| Field | Storage | Verified |
-|-------|---------|----------|
-| `User.password` | bcrypt (cost 12) | `auth.service.ts:286,320,469,490,521` |
-| `Session.refreshToken` | bcrypt (cost 10) | `auth.service.ts:360` |
-| `RegistrationToken.token` | bcrypt (cost 12) | `auth.service.ts:253` |
-| `PasswordResetToken.token` | bcrypt (cost 12) | implied by compare at `:311` |
-
----
-
-## Merge Decision
-
-**BLOCKED.** Three CRITICAL findings must be resolved before Phase 1.2 schema rewrite can merge. Findings 1-3 are pre-existing vulnerabilities in the auth layer but must not carry forward into the rewritten schema without remediation.
+- **7 critical credential/secret logging vulnerabilities** removed
+- **OTP codes** now hashed with bcrypt before DB storage; backdoor test number removed
+- **CORS** no longer falls back to wildcard
+- **6 medium/low** items flagged as warnings for follow-up hardening
