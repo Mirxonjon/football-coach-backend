@@ -1,81 +1,60 @@
 import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import * as bcrypt from 'bcryptjs';
 
-const OTP_TTL_MINUTES = parseInt(process.env.OTP_TTL_MINUTES || '3'); // 2-5 minutes window
-const OTP_RESEND_WINDOW_SECONDS = parseInt(
-  process.env.OTP_RESEND_WINDOW_SECONDS || '60'
-); // rate-limit per minute
+const OTP_TTL_MINUTES = parseInt(process.env.OTP_TTL_MINUTES || '5');
+const OTP_MAX_PER_HOUR = 5;
 
 @Injectable()
 export class OtpService {
   constructor(private prisma: PrismaService) {}
 
   async assertRateLimit(phone: string) {
-    const since = new Date(Date.now() - OTP_RESEND_WINDOW_SECONDS * 1000);
-    const recent = await this.prisma.otpCode.findFirst({
-      where: { phone, createdAt: { gte: since } },
-      orderBy: { createdAt: 'desc' },
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    const count = await this.prisma.otpCode.count({
+      where: { phone, createdAt: { gte: oneHourAgo } },
     });
-
-    if (recent) {
+    if (count >= OTP_MAX_PER_HOUR) {
       throw new HttpException(
-        'Please wait before requesting another OTP',
-        HttpStatus.TOO_MANY_REQUESTS
+        'Too many OTP requests. Try again later.',
+        HttpStatus.TOO_MANY_REQUESTS,
       );
     }
   }
 
-  async generateAndStoreOtp(phone: string, userId?: number) {
-    let code: string;
-
-    // test number
-    if (phone === '+998987654321') {
-      code = '12345';
-    } else {
-      code = '' + Math.floor(10000 + Math.random() * 90000);
-    }
-
+  async generateAndStoreOtp(phone: string, userId?: number): Promise<string> {
+    const code = '' + Math.floor(10000 + Math.random() * 90000);
+    const hashed = await bcrypt.hash(code, 10);
     const expiresAt = new Date(Date.now() + OTP_TTL_MINUTES * 60 * 1000);
 
     await this.prisma.otpCode.create({
-      data: { phone, userId, code, expiresAt },
+      data: { phone, userId, code: hashed, expiresAt },
     });
     return code;
   }
 
-  async verifyOtp(phone: string, code: string) {
+  async verifyOtp(phone: string, code: string): Promise<boolean> {
     const now = new Date();
-    const otp = await this.prisma.otpCode.findFirst({
+    const otps = await this.prisma.otpCode.findMany({
       where: { phone, isUsed: false, expiresAt: { gte: now } },
       orderBy: { createdAt: 'desc' },
+      take: 5,
     });
-    if (!otp) return false;
 
-    // increment attempts and check
-    const updated = await this.prisma.otpCode.update({
-      where: { id: otp.id },
-      data: { attemptsCount: { increment: 1 } },
-    });
-    if (updated.attemptsCount > 5) {
-      await this.prisma.otpCode.update({
-        where: { id: otp.id },
-        data: { isUsed: true },
-      });
-      return false;
+    for (const otp of otps) {
+      const match = await bcrypt.compare(code, otp.code);
+      if (match) {
+        await this.prisma.otpCode.update({
+          where: { id: otp.id },
+          data: { isUsed: true },
+        });
+        await this.prisma.otpCode.updateMany({
+          where: { phone, id: { not: otp.id }, isUsed: false },
+          data: { isUsed: true },
+        });
+        return true;
+      }
     }
-
-    if (otp.code !== code) {
-      return false;
-    }
-
-    await this.prisma.otpCode.update({
-      where: { id: otp.id },
-      data: { isUsed: true },
-    });
-    await this.prisma.otpCode.updateMany({
-      where: { phone, id: { not: otp.id } },
-      data: { isUsed: true },
-    });
-    return true;
+    return false;
   }
 }
