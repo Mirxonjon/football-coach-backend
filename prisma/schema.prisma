@@ -42,11 +42,15 @@ model Role {
 model User {
   id                  Int                  @id @default(autoincrement())
   phone               String               @unique
+  email               String?              @unique
   password            String?
   firstName           String?
   lastName            String?
-  wasBorn             DateTime?
+  birthDate           DateTime?
+  googleId            String?              @unique
+  avatarUrl           String?
   isVerified          Boolean              @default(false)
+  isActive            Boolean              @default(true)
   roleId              Int
   role                Role                 @relation(fields: [roleId], references: [id])
   sessions            Session[]
@@ -65,20 +69,24 @@ model User {
   telegramSetting     TelegramSetting?
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
+
+  @@index([roleId])
 }
 
 model OtpCode {
   id            Int      @id @default(autoincrement())
   code          String
-  phone         String
+  phone         String?
+  email         String?
   userId        Int?
   user          User?    @relation(fields: [userId], references: [id])
   expiresAt     DateTime
   isUsed        Boolean  @default(false)
-  attemptsCount Int      @default(0)
   createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   @@index([phone])
+  @@index([email])
   @@index([userId])
 }
 
@@ -153,6 +161,7 @@ model Session {
   updatedAt    DateTime @updatedAt
 
   @@index([userId])
+  @@index([expiresAt])
 }
 
 enum ConnectorStatus {

@@ -42,6 +42,7 @@
     "class-validator": "^0.14.1",
     "dotenv": "^16.6.1",
     "firebase-admin": "^12.6.0",
+    "google-auth-library": "^10.6.2",
     "googleapis": "^171.4.0",
     "helmet": "^8.1.0",
     "minio": "^8.0.5",
@@ -108,6 +109,9 @@
       "**/*.(t|j)s"
     ],
     "coverageDirectory": "../coverage",
-    "testEnvironment": "node"
+    "testEnvironment": "node",
+    "moduleNameMapper": {
+      "^@/(.*)$": "<rootDir>/$1"
+    }
   }
 }
