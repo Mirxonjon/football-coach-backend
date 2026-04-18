@@ -86,25 +86,28 @@ async function main() {
       trainingCategoryId: tc1.id,
       titleUz: '1-dars: To\'p bilan yugurishlar',
       titleRu: 'Урок 1: Бег с мячом',
-      sequenceOrder: 1,
-      descriptionUz: 'To\'p bilan yugurish mashqlari',
-      descriptionRu: 'Упражнения по бегу с мячом',
     },
   });
 
-  const blockTypes: BlockType[] = ['TITLE', 'TEXT', 'VIDEO', 'IMAGE', 'FILE', 'HINT'];
-  for (let i = 0; i < blockTypes.length; i++) {
+  const blocks: { type: BlockType; uz: string; ru: string; duration?: number }[] = [
+    { type: 'TITLE', uz: 'To\'p bilan yugurish mashqlari', ru: 'Упражнения по бегу с мячом' },
+    { type: 'TEXT', uz: 'Bu darsda to\'p bilan yugurish texnikasini o\'rganamiz', ru: 'В этом уроке изучаем технику бега с мячом' },
+    { type: 'VIDEO', uz: 'https://example.com/video.mp4', ru: 'https://example.com/video.mp4', duration: 120 },
+    { type: 'IMAGE', uz: 'https://example.com/tactic.png', ru: 'https://example.com/tactic.png' },
+    { type: 'HINT', uz: 'To\'pni oyoq uchi bilan suring', ru: 'Ведите мяч носком стопы' },
+  ];
+  for (let i = 0; i < blocks.length; i++) {
     await prisma.lessonBlock.upsert({
       where: { id: i + 1 },
       update: {},
       create: {
         id: i + 1,
         lessonId: lesson.id,
-        blockType: blockTypes[i],
-        contentUz: `${blockTypes[i]} blok namunasi`,
-        contentRu: `Пример блока ${blockTypes[i]}`,
+        blockType: blocks[i].type,
+        contentUz: blocks[i].uz,
+        contentRu: blocks[i].ru,
         sequenceOrder: i + 1,
-        duration: blockTypes[i] === 'VIDEO' ? 120 : undefined,
+        duration: blocks[i].duration,
       },
     });
   }

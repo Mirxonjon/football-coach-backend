@@ -105,7 +105,7 @@ export class TrainingService {
     await this.requireSubscription(userId);
     return this.prisma.trainingLesson.findMany({
       where: trainingCategoryId ? { trainingCategoryId } : undefined,
-      orderBy: { sequenceOrder: 'asc' },
+      orderBy: { id: 'asc' },
     });
   }
 
