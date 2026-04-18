@@ -1,0 +1,16 @@
+services:
+  nest-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "${APP_PORT}:${APP_PORT}"
+    environment:
+      - APP_PORT=${APP_PORT}
+      - NODE_ENV=${NODE_ENV}
+      - FRONTEND_BASE_URL=${FRONTEND_BASE_URL}
+      - TELEGRAM_BOT_URL=${TELEGRAM_BOT_URL}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - DATABASE_URL=${DATABASE_URL}
+      - JWT_SECRET=${JWT_SECRET}
+    restart: unless-stopped

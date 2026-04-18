@@ -1,0 +1,44 @@
+<!doctype html>
+<html>
+  <body>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script>
+      const socket = io('http://localhost:3000', {
+        transports: ['websocket'],
+      });
+
+      socket.on('connect', () => {
+        console.log('CONNECTED:', socket.id);
+
+        // 1️⃣ Filtrsiz asosiy ma’lumotlarni so‘raymiz
+        socket.emit('get_logistics', {
+          countryFrom: 'UZ',
+          countryTo: 'UZ',
+          aiStatus: 'KEEP',
+          page: 1,
+          limit: 20,
+        });
+      });
+
+      // 2️⃣ Serverdan initial data keladi
+      socket.on('get_logistics', (msg) => {
+        if (msg.type === 'initial') {
+          console.log('INITIAL DATA:', msg.data);
+        }
+
+        if (msg.type === 'new') {
+          console.log('YANGI XABAR:', msg.data);
+        }
+
+        if (msg.type === 'error') {
+          console.error('SERVER ERROR:', msg.message);
+        }
+      });
+
+      // Agar sizning serverda 'logistics_data' event hali ishlatilayotgan bo‘lsa:
+      socket.on('logistics_data', (data) => {
+        console.log('LEGACY INITIAL LOGISTICS:', data);
+      });
+    </script>
+  </body>
+</html>
