@@ -17,6 +17,7 @@ import { LegalModule } from './modules/legal/legal.module';
 import { NotificationModule } from './modules/notification/notification.module';
 import { SocketModule } from './modules/socket/socket.module';
 import { TelegramModule } from './modules/telegram/telegram.module';
+import { PaymentsModule } from './modules/payments/payments.module';
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -31,6 +32,7 @@ import { TelegramModule } from './modules/telegram/telegram.module';
     NotificationModule,
     SocketModule,
     TelegramModule,
+    PaymentsModule,
   ],
   providers: [
     {
