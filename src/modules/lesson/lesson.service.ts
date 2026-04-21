@@ -13,8 +13,14 @@ export class LessonService {
     private readonly trainingCategoryService: TrainingCategoryService,
   ) {}
 
-  // ── Subscription gate ──
+  // ── Subscription gate (admins bypass) ──
   private async requireSubscription(userId: number) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: { role: true },
+    });
+    if (user?.role?.name === 'ADMIN') return;
+
     const sub = await this.prisma.subscription.findFirst({
       where: { userId, isActive: true, endDate: { gte: new Date() } },
     });
@@ -26,7 +32,7 @@ export class LessonService {
     await this.requireSubscription(userId);
     return this.prisma.trainingLesson.findMany({
       where: trainingCategoryId ? { trainingCategoryId } : undefined,
-      orderBy: { sequenceOrder: 'asc' },
+      orderBy: { id: 'asc' },
     });
   }
 

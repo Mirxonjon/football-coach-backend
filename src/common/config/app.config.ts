@@ -6,6 +6,7 @@ dotenv.config();
 export const CONFIG_APP_TOKEN = process.env.CONFIG_APP_TOKEN || 'app';
 export const CONFIG_MONGO_DB_TOKEN = process.env.CONFIG_MONGO_DB_TOKEN || 'db';
 export const CONFIG_MINIO_TOKEN = process.env.CONFIG_MINIO_TOKEN || 'minio';
+export const CONFIG_R2_TOKEN = 'r2';
 export const CONFIG_OPENAI_TOKEN = 'openai';
 
 export const appConfig = registerAs(
@@ -37,6 +38,21 @@ export const minioConfig = registerAs(
     publicBucket: process.env.MINIO_PUBLIC_BUCKET || 'crm',
   })
 );
+export const r2Config = registerAs(
+  CONFIG_R2_TOKEN,
+  (): R2Config => ({
+    accountId: process.env.R2_ACCOUNT_ID || '',
+    accessKeyId: process.env.R2_ACCESS_KEY_ID || '',
+    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY || '',
+    endpoint: process.env.R2_ENDPOINT || '',
+    region: process.env.R2_REGION || 'auto',
+    bucketName: process.env.R2_BUCKET_NAME || 'football-coach',
+    publicUrl:
+      process.env.R2_PUBLIC_URL ||
+      `${process.env.R2_ENDPOINT || ''}/${process.env.R2_BUCKET_NAME || 'football-coach'}`,
+  }),
+);
+
 export const openAIConfig = registerAs(
   CONFIG_OPENAI_TOKEN,
   (): OpenAIConfig => ({
@@ -68,6 +84,16 @@ export type MinioConfig = {
   bucketName: string;
   publicUrl: string;
   publicBucket: string;
+};
+
+export type R2Config = {
+  accountId: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+  endpoint: string;
+  region: string;
+  bucketName: string;
+  publicUrl: string;
 };
 
 export const ValidatorConfig = {

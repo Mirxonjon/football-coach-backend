@@ -5,7 +5,10 @@ import {
   dbConfig,
   minioConfig,
   openAIConfig,
+  r2Config,
 } from './common/config/app.config';
+import { StorageModule } from './common/services/storage/storage.module';
+import { UploadModule } from './modules/upload/upload.module';
 import { APP_FILTER } from '@nestjs/core';
 import { CronJobModule } from './common/cron/cron.module';
 import { PrismaModule } from './modules/prisma/prisma.module';
@@ -24,12 +27,15 @@ import { AiChatModule } from './modules/ai-chat/ai-chat.module';
 import { SubscriptionModule } from './modules/subscription/subscription.module';
 import { SubscriptionPlanModule } from './modules/subscription-plan/subscription-plan.module';
 import { HealthModule } from './modules/health/health.module';
+import { StatsModule } from './modules/stats/stats.module';
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [appConfig, dbConfig, minioConfig, openAIConfig],
+      load: [appConfig, dbConfig, minioConfig, openAIConfig, r2Config],
     }),
+    StorageModule,
+    UploadModule,
     PrismaModule,
     CronJobModule,
     AuthModule,
@@ -45,6 +51,7 @@ import { HealthModule } from './modules/health/health.module';
     SubscriptionModule,
     SubscriptionPlanModule,
     HealthModule,
+    StatsModule,
   ],
   providers: [
     {

@@ -1,10 +1,9 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
-import { minioConfig } from '../../config/app.config';
+import { StorageModule } from '../storage/storage.module';
 import { MinioService } from './minio.service';
 
 @Module({
-  imports: [ConfigModule.forFeature(minioConfig)],
+  imports: [StorageModule],
   providers: [MinioService],
   exports: [MinioService],
 })

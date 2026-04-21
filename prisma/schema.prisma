@@ -333,12 +333,6 @@ model TrainingLesson {
   trainingCategory   TrainingCategory @relation(fields: [trainingCategoryId], references: [id])
   titleUz            String           @db.VarChar(200)
   titleRu            String           @db.VarChar(200)
-  videoUrl           String?
-  duration           Int?
-  sequenceOrder      Int
-  descriptionRu      String
-  descriptionUz      String
-  tacticHintImg      String?
 
   lessonBlocks   LessonBlock[]
   lessonProgress LessonProgress[]
@@ -347,7 +341,6 @@ model TrainingLesson {
   updatedAt DateTime @updatedAt
 
   @@index([trainingCategoryId])
-  @@index([sequenceOrder])
 }
 
 model LessonProgress {

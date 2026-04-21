@@ -150,11 +150,6 @@ async function main() {
         trainingCategoryId: l.catId,
         titleUz: l.titleUz,
         titleRu: l.titleRu,
-        videoUrl: `https://example.com/videos/lesson-${l.id}.mp4`,
-        duration: l.duration,
-        sequenceOrder: l.order,
-        descriptionUz: `${l.titleUz} — batafsil mashg\'ulot`,
-        descriptionRu: `${l.titleRu} — детальная тренировка`,
       },
     });
 

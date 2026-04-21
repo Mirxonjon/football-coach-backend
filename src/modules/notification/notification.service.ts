@@ -2,12 +2,23 @@ import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '@/modules/prisma/prisma.service';
 import { FirebaseAdminService } from './firebase-admin.service';
 import { NotificationQueryDto } from './dto/notification-query.dto';
+import { NotificationType } from '@prisma/client';
 import * as admin from 'firebase-admin';
 
 export type NotificationPayload = {
   title: string;
   body: string;
   type: string;
+  data?: Record<string, any>;
+};
+
+export type BilingualNotificationPayload = {
+  titleUz: string;
+  titleRu: string;
+  messageUz: string;
+  messageRu: string;
+  type: NotificationType;
+  relatedId?: number;
   data?: Record<string, any>;
 };
 
@@ -203,6 +214,149 @@ export class NotificationService {
       payload.data,
     );
     return { success: true, sent: res?.successCount ?? 0 };
+  }
+
+  // ─── Admin bilingual sending ───
+
+  async adminSendToUser(userId: number, payload: BilingualNotificationPayload) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException(`User ${userId} not found`);
+
+    const devices = await this.prisma.userDevice.findMany({
+      where: { userId },
+      select: { fcmToken: true },
+    });
+
+    const notification = await this.prisma.notification.create({
+      data: {
+        userId,
+        titleUz: payload.titleUz,
+        titleRu: payload.titleRu,
+        messageUz: payload.messageUz,
+        messageRu: payload.messageRu,
+        type: payload.type,
+        relatedId: payload.relatedId,
+      },
+    });
+
+    let sent = 0;
+    if (devices.length > 0) {
+      const tokens = devices.map((d) => d.fcmToken);
+      const res = await this.sendMulticast(
+        tokens,
+        payload.titleUz,
+        payload.messageUz,
+        payload.data,
+      );
+      sent = res?.successCount ?? 0;
+    }
+
+    return { success: true, notificationId: notification.id, sent, devices: devices.length };
+  }
+
+  async adminSendToMany(userIds: number[], payload: BilingualNotificationPayload) {
+    const existing = await this.prisma.user.findMany({
+      where: { id: { in: userIds } },
+      select: { id: true },
+    });
+    const validIds = existing.map((u) => u.id);
+    if (validIds.length === 0) {
+      throw new NotFoundException('No valid users found for given ids');
+    }
+
+    const devices = await this.prisma.userDevice.findMany({
+      where: { userId: { in: validIds } },
+      select: { fcmToken: true },
+    });
+
+    const created = await this.prisma.$transaction(
+      validIds.map((uid) =>
+        this.prisma.notification.create({
+          data: {
+            userId: uid,
+            titleUz: payload.titleUz,
+            titleRu: payload.titleRu,
+            messageUz: payload.messageUz,
+            messageRu: payload.messageRu,
+            type: payload.type,
+            relatedId: payload.relatedId,
+          },
+        }),
+      ),
+    );
+
+    let sent = 0;
+    if (devices.length > 0) {
+      const tokens = devices.map((d) => d.fcmToken);
+      const res = await this.sendMulticast(
+        tokens,
+        payload.titleUz,
+        payload.messageUz,
+        payload.data,
+      );
+      sent = res?.successCount ?? 0;
+    }
+
+    return {
+      success: true,
+      recipients: validIds.length,
+      created: created.length,
+      devices: devices.length,
+      sent,
+    };
+  }
+
+  async adminBroadcast(payload: BilingualNotificationPayload) {
+    const users = await this.prisma.user.findMany({
+      where: { isActive: true },
+      select: { id: true },
+    });
+    const userIds = users.map((u) => u.id);
+
+    if (userIds.length === 0) {
+      return { success: true, recipients: 0, created: 0, devices: 0, sent: 0 };
+    }
+
+    const devices = await this.prisma.userDevice.findMany({
+      where: { userId: { in: userIds } },
+      select: { fcmToken: true },
+    });
+
+    const created = await this.prisma.$transaction(
+      userIds.map((uid) =>
+        this.prisma.notification.create({
+          data: {
+            userId: uid,
+            titleUz: payload.titleUz,
+            titleRu: payload.titleRu,
+            messageUz: payload.messageUz,
+            messageRu: payload.messageRu,
+            type: payload.type,
+            relatedId: payload.relatedId,
+          },
+        }),
+      ),
+    );
+
+    let sent = 0;
+    if (devices.length > 0) {
+      const tokens = devices.map((d) => d.fcmToken);
+      const res = await this.sendMulticast(
+        tokens,
+        payload.titleUz,
+        payload.messageUz,
+        payload.data,
+      );
+      sent = res?.successCount ?? 0;
+    }
+
+    return {
+      success: true,
+      recipients: userIds.length,
+      created: created.length,
+      devices: devices.length,
+      sent,
+    };
   }
 
   // ─── FCM transport ───
