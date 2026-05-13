@@ -4,6 +4,7 @@ import { PassportModule } from '@nestjs/passport';
 import { ConfigModule } from '@nestjs/config';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
+import { AdminController } from './admin.controller';
 import { PrismaModule } from '../prisma/prisma.module';
 import { OtpService } from './otp.service';
 import { SmsService } from './sms.service';
@@ -19,7 +20,7 @@ import { RolesGuard } from './guards/roles.guard';
       secret: process.env.JWT_SECRET || process.env.JWT_SECRET_KEY || 'secret-key',
     }),
   ],
-  controllers: [AuthController],
+  controllers: [AuthController, AdminController],
   providers: [AuthService, OtpService, SmsService, AccessTokenStrategy, RolesGuard],
   exports: [AuthService, PassportModule, AccessTokenStrategy],
 })

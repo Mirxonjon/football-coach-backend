@@ -5,6 +5,7 @@ import { CardsService } from './cards.service';
 import { WalletController } from './wallet.controller';
 import { WalletService } from './wallet.service';
 import { InternalPaymentProvider } from './providers/internal.provider';
+import { ClickProvider } from './providers/click.provider';
 
 @Module({
   imports: [PrismaModule],
@@ -13,7 +14,8 @@ import { InternalPaymentProvider } from './providers/internal.provider';
     CardsService,
     WalletService,
     InternalPaymentProvider,
+    ClickProvider,
   ],
-  exports: [CardsService, WalletService, InternalPaymentProvider],
+  exports: [CardsService, WalletService, InternalPaymentProvider, ClickProvider],
 })
 export class PaymentsModule {}

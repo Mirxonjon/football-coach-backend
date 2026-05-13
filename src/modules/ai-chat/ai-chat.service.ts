@@ -48,7 +48,15 @@ export class AiChatService {
       }),
       this.prisma.aiChat.count({ where: { userId } }),
     ]);
-    return { data, total, page, limit };
+    return {
+      data,
+      meta: {
+        page,
+        limit,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+      },
+    };
   }
 
   async createChat(userId: number, title: string) {

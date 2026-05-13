@@ -3,6 +3,7 @@
 /node_modules
 /config/google-service-account.json
 /firebase-key.json
+/firebase-credentials.json
 
 
 # Logs

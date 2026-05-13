@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsString, IsInt, IsOptional, IsEnum, Min } from 'class-validator';
+import { IsBoolean, IsEnum, IsInt, IsOptional, IsString, Min } from 'class-validator';
 import { BlockType } from '@prisma/client';
 
 export class CreateLessonBlockDto {
@@ -25,4 +25,12 @@ export class CreateLessonBlockDto {
   @IsInt()
   @Min(0)
   sequenceOrder: number;
+
+  @ApiPropertyOptional({
+    description: 'If true, this block is viewable without an active subscription (preview).',
+    default: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  isFree?: boolean;
 }

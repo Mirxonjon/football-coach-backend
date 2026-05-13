@@ -17,7 +17,9 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "test:e2e": "jest --config ./test/jest-e2e.json"
+    "test:e2e": "jest --config ./test/jest-e2e.json",
+    "prisma:seed": "prisma db seed",
+    "prisma:reset": "prisma migrate reset --force"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1032.0",
@@ -45,6 +47,7 @@
     "class-validator": "^0.14.1",
     "dotenv": "^16.6.1",
     "firebase-admin": "^12.6.0",
+    "google-auth-library": "^10.5.0",
     "googleapis": "^171.4.0",
     "helmet": "^8.1.0",
     "minio": "^8.0.5",

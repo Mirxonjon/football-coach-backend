@@ -1,5 +1,6 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsString, IsInt } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
+import { IsBoolean, IsInt, IsOptional, IsString } from 'class-validator';
 
 export class CreateLessonDto {
   @ApiProperty({ example: 1 })
@@ -13,4 +14,13 @@ export class CreateLessonDto {
   @ApiProperty({ example: 'Lesson title RU' })
   @IsString()
   titleRu: string;
+
+  @ApiPropertyOptional({
+    description: 'If true, the entire lesson is free to view without an active subscription.',
+    default: false,
+  })
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  isFree?: boolean;
 }

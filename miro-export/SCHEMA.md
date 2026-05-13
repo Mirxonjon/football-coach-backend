@@ -1,0 +1,508 @@
+# Prisma Schema (ma'lumotlar bazasi tuzilmasi)
+
+> Bu fayl `schema.prisma` ning markdown formatdagi nusxasi. AI vositalari `.prisma` kengaytmasini o'qiy olmasa, shu faylni ishlating.
+
+## Texnologiya
+- **ORM:** Prisma 5.22
+- **DB:** PostgreSQL
+- **Generator:** prisma-client-js
+
+## Asosiy domenlar (qisqacha)
+
+| Klaster | Modellar |
+|---|---|
+| Identity | Role, User, Session, OtpCode |
+| Push & qurilmalar | UserDevice, Notification |
+| To'lov | Card, WalletTransaction, SubscriptionPlan, Subscription |
+| Kitoblar | BookCategory, Book, UserBook, BookProgress |
+| Mashg'ulotlar | AgeCategory, TrainingCategory, TrainingLesson, LessonBlock, LessonProgress |
+| Master-klass | MasterclassCategory, Masterclass, MasterclassBlock |
+| AI | AiChat, AiMessage, AiMessageImage, AiRateLimit |
+
+## To'liq schema
+
+```prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum DiscountType {
+  NONE
+  PERCENTAGE
+  FIXED_PRICE
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
+
+enum NotificationType {
+  SYSTEM
+  LESSON
+  BOOK
+  SUBSCRIPTION
+  AI_CHAT
+}
+
+enum BlockType {
+  TITLE
+  TEXT
+  VIDEO
+  IMAGE
+  FILE
+  HINT
+}
+
+enum BookCategoryType {
+  BOOK
+  KONSPEKT
+}
+
+enum AiMessageRole {
+  user
+  assistant
+}
+
+model Role {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  users     User[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model User {
+  id         Int       @id @default(autoincrement())
+  phone      String    @unique
+  email      String?   @unique
+  password   String?
+  firstName  String?
+  lastName   String?
+  birthDate  DateTime?
+  googleId   String?   @unique
+  avatarUrl  String?
+  isVerified Boolean   @default(false)
+  isActive   Boolean   @default(true)
+  roleId     Int
+  role       Role      @relation(fields: [roleId], references: [id])
+
+  sessions       Session[]
+  otpCodes       OtpCode[]
+  cards          Card[]
+  walletTx       WalletTransaction[]
+  subscriptions  Subscription[]
+  userBooks      UserBook[]
+  bookProgress   BookProgress[]
+  lessonProgress LessonProgress[]
+  notifications  Notification[]
+  devices        UserDevice[]
+  aiChats        AiChat[]
+  aiRateLimits   AiRateLimit[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([roleId])
+}
+
+model Session {
+  id           Int      @id @default(autoincrement())
+  userId       Int
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshToken String
+  ipAddress    String?
+  userAgent    String?
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model OtpCode {
+  id        Int      @id @default(autoincrement())
+  code      String
+  userId    Int?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  email     String?
+  phone     String?
+  expiresAt DateTime
+  isUsed    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([phone])
+  @@index([email])
+}
+
+model UserDevice {
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fcmToken   String   @unique
+  deviceType String   @db.VarChar(20)
+  lastActive DateTime @default(now())
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([userId])
+}
+
+model Notification {
+  id        Int              @id @default(autoincrement())
+  userId    Int
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      NotificationType
+  titleUz   String           @db.VarChar(200)
+  titleRu   String           @db.VarChar(200)
+  messageUz String
+  messageRu String
+  relatedId Int?
+  isRead    Boolean          @default(false)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  @@index([userId])
+  @@index([type])
+  @@index([isRead])
+}
+
+model Card {
+  id          Int      @id
+  userId      Int      @unique
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider    String   @default("click")
+  token       String
+  cardNumber  String?  @db.VarChar(19)
+  last4       String   @db.VarChar(4)
+  expireDate  String?  @db.VarChar(4)
+  phoneNumber String?  @db.VarChar(20)
+  isActive    Boolean  @default(true)
+  isVerified  Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  walletTx WalletTransaction[]
+}
+
+model WalletTransaction {
+  id                   Int               @id @default(autoincrement())
+  cardId               Int?
+  card                 Card?             @relation(fields: [cardId], references: [id])
+  userId               Int
+  user                 User              @relation(fields: [userId], references: [id])
+  amount               Float
+  subscriptionsPlansId Int?
+  subscriptionsPlan    SubscriptionPlan? @relation(fields: [subscriptionsPlansId], references: [id])
+  provider             String?
+  status               PaymentStatus     @default(PENDING)
+  externalId           String?
+  errorCode            String?
+  errorMessage         String?
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+
+  @@index([userId])
+  @@index([cardId])
+  @@index([subscriptionsPlansId])
+  @@index([status])
+  @@index([externalId])
+}
+
+model SubscriptionPlan {
+  id                 Int          @id @default(autoincrement())
+  titleUz            String       @db.VarChar(100)
+  titleRu            String       @db.VarChar(100)
+  descriptionUz      String
+  descriptionRu      String
+  durationDays       Int
+  discountType       DiscountType @default(NONE)
+  basePrice          Float
+  discountPercent    Int          @default(0)
+  fixedDiscountPrice Float?
+  isActive           Boolean      @default(true)
+
+  subscriptions Subscription[]
+  walletTx      WalletTransaction[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive])
+}
+
+model Subscription {
+  id                   Int              @id @default(autoincrement())
+  userId               Int
+  user                 User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  startDate            DateTime
+  endDate              DateTime
+  isActive             Boolean          @default(true)
+  autoPay              Boolean          @default(false)
+  cardId               Int?
+  lastRenewalAttemptAt DateTime?
+  lastExpiryNoticeDay  Int?
+  subscriptionsPlansId Int
+  subscriptionsPlan    SubscriptionPlan @relation(fields: [subscriptionsPlansId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([subscriptionsPlansId])
+  @@index([isActive])
+}
+
+model BookCategory {
+  id           Int              @id @default(autoincrement())
+  titleUz      String           @db.VarChar(200)
+  titleRu      String           @db.VarChar(200)
+  categoryType BookCategoryType
+  books        Book[]
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+}
+
+model Book {
+  id                 Int          @id @default(autoincrement())
+  bookCategoryId     Int
+  bookCategory       BookCategory @relation(fields: [bookCategoryId], references: [id])
+  titleUz            String       @db.VarChar(200)
+  titleRu            String       @db.VarChar(200)
+  fileUrl            String
+  basePrice          Float
+  discountType       DiscountType @default(NONE)
+  discountPercent    Int          @default(0)
+  fixedDiscountPrice Float?
+  coverImageUrl      String?
+  descriptionRu      String
+  descriptionUz      String
+  tacticHintImg      String?
+
+  userBooks    UserBook[]
+  bookProgress BookProgress[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([bookCategoryId])
+}
+
+model UserBook {
+  id            Int      @id @default(autoincrement())
+  userId        Int
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bookId        Int
+  book          Book     @relation(fields: [bookId], references: [id])
+  transactionId Int?
+  acquiredAt    DateTime @default(now())
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([userId, bookId])
+  @@index([userId])
+  @@index([bookId])
+}
+
+model BookProgress {
+  id           Int      @id @default(autoincrement())
+  userId       Int
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bookId       Int
+  book         Book     @relation(fields: [bookId], references: [id])
+  lastPageRead Int      @default(0)
+  isCompleted  Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([userId, bookId])
+  @@index([userId])
+  @@index([bookId])
+}
+
+model AgeCategory {
+  id                 Int                @id @default(autoincrement())
+  titleUz            String             @db.VarChar(200)
+  titleRu            String             @db.VarChar(200)
+  minAge             Int
+  maxAge             Int
+  iconUrl            String?
+  trainingCategories TrainingCategory[]
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+}
+
+model TrainingCategory {
+  id              Int         @id @default(autoincrement())
+  titleUz         String      @db.VarChar(200)
+  titleRu         String      @db.VarChar(200)
+  ageCategoriesId Int
+  ageCategory     AgeCategory @relation(fields: [ageCategoriesId], references: [id])
+  descriptionUz   String
+  descriptionRu   String
+  imageUrl        String?
+
+  trainingLessons TrainingLesson[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([ageCategoriesId])
+}
+
+model TrainingLesson {
+  id                 Int              @id @default(autoincrement())
+  trainingCategoryId Int
+  trainingCategory   TrainingCategory @relation(fields: [trainingCategoryId], references: [id])
+  titleUz            String           @db.VarChar(200)
+  titleRu            String           @db.VarChar(200)
+  isFree             Boolean          @default(false)
+
+  lessonBlocks   LessonBlock[]
+  lessonProgress LessonProgress[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([trainingCategoryId])
+}
+
+model LessonProgress {
+  id                Int            @id @default(autoincrement())
+  userId            Int
+  user              User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lessonId          Int
+  lesson            TrainingLesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  lastBlockSequence Int            @default(0)
+  isCompleted       Boolean        @default(false)
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  @@unique([userId, lessonId])
+  @@index([userId])
+  @@index([lessonId])
+}
+
+model LessonBlock {
+  id            Int            @id @default(autoincrement())
+  lessonId      Int
+  lesson        TrainingLesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  blockType     BlockType
+  contentUz     String
+  contentRu     String
+  duration      Int?
+  sequenceOrder Int
+  isFree        Boolean        @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([lessonId])
+  @@index([sequenceOrder])
+}
+
+model MasterclassCategory {
+  id            Int           @id @default(autoincrement())
+  titleUz       String        @db.VarChar(200)
+  titleRu       String        @db.VarChar(200)
+  descriptionUz String
+  descriptionRu String
+  imageUrl      String?
+  masterclasses Masterclass[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Masterclass {
+  id                    Int                 @id @default(autoincrement())
+  masterclassCategoryId Int
+  masterclassCategory   MasterclassCategory @relation(fields: [masterclassCategoryId], references: [id])
+  titleUz               String              @db.VarChar(200)
+  titleRu               String              @db.VarChar(200)
+  blocks                MasterclassBlock[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([masterclassCategoryId])
+}
+
+model MasterclassBlock {
+  id            Int         @id @default(autoincrement())
+  masterclassId Int
+  masterclass   Masterclass @relation(fields: [masterclassId], references: [id], onDelete: Cascade)
+  blockType     BlockType
+  contentUz     String
+  contentRu     String
+  duration      Int?
+  sequenceOrder Int
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([masterclassId])
+  @@index([sequenceOrder])
+}
+
+model AiChat {
+  id        Int         @id @default(autoincrement())
+  userId    Int
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String      @db.VarChar(200)
+  messages  AiMessage[]
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  @@index([userId])
+}
+
+model AiMessage {
+  id          Int              @id @default(autoincrement())
+  chatId      Int
+  chat        AiChat           @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  role        AiMessageRole
+  messageText String
+  images      AiMessageImage[]
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@index([chatId])
+}
+
+model AiMessageImage {
+  id        Int       @id @default(autoincrement())
+  messageId Int
+  message   AiMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  imageUrl  String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([messageId])
+}
+
+model AiRateLimit {
+  id           Int      @id @default(autoincrement())
+  userId       Int
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ipAddress    String   @db.VarChar(45)
+  requestCount Int      @default(0)
+  lastRequest  DateTime @default(now())
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([userId, ipAddress])
+  @@index([userId])
+  @@index([ipAddress])
+}
+```

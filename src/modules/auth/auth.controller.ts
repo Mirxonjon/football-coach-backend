@@ -78,7 +78,17 @@ export class AuthController {
   @Public()
   @Post('google')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Auth with Google ID token' })
+  @ApiOperation({
+    summary:
+      'Sign in or register with Google — single endpoint handles both flows',
+    description:
+      'Send the Google ID token (audience must match GOOGLE_WEB_CLIENT_ID).\n\n' +
+      'Resolution order:\n' +
+      '1. If a user with this googleId already exists → log in.\n' +
+      '2. Else if a user with this email exists → link googleId to that account and log in.\n' +
+      '3. Else → create a new USER (isVerified=true) and log in.\n\n' +
+      'Returns { accessToken, refreshToken, user } in every case.',
+  })
   @ApiBody({ type: GoogleAuthDto })
   googleAuth(@Body() dto: GoogleAuthDto, @Req() req: Request) {
     return this.authService.googleAuth(dto, this.device(req));

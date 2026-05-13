@@ -1,154 +1,232 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { LegalDocumentType, Prisma } from '@prisma/client';
 import { PrismaService } from '@/modules/prisma/prisma.service';
-import { LegalDocumentType, Language, Prisma } from '@prisma/client';
 import { CreateLegalDocumentDto } from '@/types/legal/create-legal-document.dto';
 import { UpdateLegalDocumentDto } from '@/types/legal/update-legal-document.dto';
-import { FilterLegalDocumentDto } from '@/types/legal/filter-legal-document.dto';
-import { CreateLegalTranslationDto } from '@/types/legal/create-legal-translation.dto';
-import { UpdateLegalTranslationDto } from '@/types/legal/update-legal-translation.dto';
 
 @Injectable()
 export class LegalService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
-  async createDocument(dto: CreateLegalDocumentDto) {
-    const created = await this.prisma.legalDocument.create({
-      data: {
-        type: dto.type,
-        version: dto.version,
-        isActive: dto.isActive ?? true,
-        translations: dto.translations?.length
-          ? {
-              create: dto.translations.map((t) => ({
-                language: t.language,
-                title: t.title,
-                content: t.content,
-              })),
-            }
-          : undefined,
-      },
-      include: { translations: true },
+  // ─── Public ────────────────────────────────────────────────────────
+
+  /**
+   * Active document for every type — used by the footer "Документы"
+   * section and by the mobile consent screen.
+   */
+  async listActive() {
+    return this.prisma.legalDocument.findMany({
+      where: { isActive: true },
+      orderBy: { type: 'asc' },
     });
-    return created;
   }
 
+  /** Latest active document of a given type. */
+  async getActiveByType(type: LegalDocumentType) {
+    const doc = await this.prisma.legalDocument.findFirst({
+      where: { type, isActive: true },
+      orderBy: { version: 'desc' },
+    });
+    if (!doc) {
+      throw new NotFoundException(`No active document for type ${type}`);
+    }
+    return doc;
+  }
+
+  // ─── Admin ─────────────────────────────────────────────────────────
+
+  /**
+   * Create a new version. If `isActive=true` (default), the previous
+   * active document of this type is deactivated and the new row gets
+   * version = previous.version + 1. This way the table keeps a full
+   * history of every published version.
+   */
+  async createDocument(dto: CreateLegalDocumentDto) {
+    const isActive = dto.isActive ?? true;
+
+    return this.prisma.$transaction(async (tx) => {
+      const previous = await tx.legalDocument.findFirst({
+        where: { type: dto.type },
+        orderBy: { version: 'desc' },
+      });
+      const nextVersion = previous ? previous.version + 1 : 1;
+
+      if (isActive && previous?.isActive) {
+        await tx.legalDocument.update({
+          where: { id: previous.id },
+          data: { isActive: false },
+        });
+      }
+
+      return tx.legalDocument.create({
+        data: {
+          type: dto.type,
+          version: nextVersion,
+          titleUz: dto.titleUz,
+          titleRu: dto.titleRu,
+          contentUz: dto.contentUz,
+          contentRu: dto.contentRu,
+          isActive,
+        },
+      });
+    });
+  }
+
+  /**
+   * Edit a draft (or fix typo in published doc) — does NOT bump version
+   * or deactivate siblings. Use createDocument for a real new version.
+   */
   async updateDocument(id: number, dto: UpdateLegalDocumentDto) {
     await this.ensureDocument(id);
-    const updated = await this.prisma.legalDocument.update({
-      where: { id },
-      data: {
-        type: dto.type,
-        version: dto.version,
-        isActive: dto.isActive,
-      },
-      include: { translations: true },
+    return this.prisma.$transaction(async (tx) => {
+      const current = await tx.legalDocument.findUniqueOrThrow({ where: { id } });
+
+      // If admin is activating this row, deactivate every other active
+      // doc of the same type to preserve the "one active per type" invariant.
+      if (dto.isActive === true && !current.isActive) {
+        await tx.legalDocument.updateMany({
+          where: { type: current.type, isActive: true, NOT: { id } },
+          data: { isActive: false },
+        });
+      }
+
+      return tx.legalDocument.update({
+        where: { id },
+        data: {
+          titleUz: dto.titleUz,
+          titleRu: dto.titleRu,
+          contentUz: dto.contentUz,
+          contentRu: dto.contentRu,
+          isActive: dto.isActive,
+        },
+      });
     });
-    return updated;
   }
 
   async deleteDocument(id: number) {
-    await this.ensureDocument(id);
+    const doc = await this.ensureDocument(id);
+    if (doc.isActive) {
+      throw new ConflictException(
+        'Cannot delete an active document. Deactivate it first or publish a new version.',
+      );
+    }
     await this.prisma.legalDocument.delete({ where: { id } });
     return { success: true };
   }
 
-  async listDocuments(filter: FilterLegalDocumentDto) {
-    const {
-      type,
-      isActive,
-      version,
-      page = 1,
-      limit = 10,
-      sortBy = 'createdAt',
-      sortOrder = 'desc',
-    } = filter;
-
-    const sortable = new Set(['createdAt', 'version', 'id']);
-    const orderField = sortable.has(sortBy) ? sortBy : 'createdAt';
-    const orderDir: Prisma.SortOrder = sortOrder === 'asc' ? 'asc' : 'desc';
-
+  /** Admin list — full history of every version, paginated. */
+  async listAll(params: {
+    type?: LegalDocumentType;
+    isActive?: boolean;
+    page?: number;
+    limit?: number;
+  }) {
+    const page = Math.max(1, params.page ?? 1);
+    const limit = Math.min(100, Math.max(1, params.limit ?? 20));
     const where: Prisma.LegalDocumentWhereInput = {};
-    if (type) where.type = type;
-    if (typeof isActive === 'boolean') where.isActive = isActive;
-    if (version) where.version = { contains: version, mode: 'insensitive' };
+    if (params.type) where.type = params.type;
+    if (typeof params.isActive === 'boolean') where.isActive = params.isActive;
 
-    const [items, total] = await this.prisma.$transaction([
+    const [data, total] = await this.prisma.$transaction([
       this.prisma.legalDocument.findMany({
         where,
-        include: { translations: true },
-        orderBy: { [orderField]: orderDir },
+        orderBy: [{ type: 'asc' }, { version: 'desc' }],
         skip: (page - 1) * limit,
         take: limit,
       }),
       this.prisma.legalDocument.count({ where }),
     ]);
 
-    return { items, total, page, limit };
-  }
-
-  async createTranslation(documentId: number, dto: CreateLegalTranslationDto) {
-    await this.ensureDocument(documentId);
-    const created = await this.prisma.legalTranslation.create({
-      data: {
-        documentId,
-        language: dto.language,
-        title: dto.title,
-        content: dto.content,
-      },
-    });
-    return created;
-  }
-
-  async updateTranslation(id: number, dto: UpdateLegalTranslationDto) {
-    await this.ensureTranslation(id);
-    const updated = await this.prisma.legalTranslation.update({
-      where: { id },
-      data: {
-        language: dto.language,
-        title: dto.title,
-        content: dto.content,
-      },
-    });
-    return updated;
-  }
-
-  async deleteTranslation(id: number) {
-    await this.ensureTranslation(id);
-    await this.prisma.legalTranslation.delete({ where: { id } });
-    return { success: true };
-  }
-
-  async publicGet(type: LegalDocumentType, lang: Language) {
-    const doc = await this.prisma.legalDocument.findFirst({
-      where: { type, isActive: true },
-      orderBy: { createdAt: 'desc' },
-      include: {
-        translations: {
-          where: { language: lang },
-          select: { language: true, title: true, content: true },
-        },
-      },
-    });
-    if (!doc || !doc.translations?.length) {
-      throw new NotFoundException('Document not found for requested language');
-    }
-    const t = doc.translations[0];
     return {
-      type: doc.type,
-      version: doc.version,
-      language: t.language,
-      title: t.title,
-      content: t.content,
+      data,
+      meta: {
+        page,
+        limit,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+      },
     };
   }
 
-  private async ensureDocument(id: number) {
-    const exists = await this.prisma.legalDocument.findUnique({ where: { id } });
-    if (!exists) throw new NotFoundException('Legal document not found');
+  // ─── Consent ───────────────────────────────────────────────────────
+
+  /** Documents the user has already accepted (with the doc payload). */
+  async listMyConsents(userId: number) {
+    return this.prisma.userConsent.findMany({
+      where: { userId },
+      orderBy: { acceptedAt: 'desc' },
+      include: { document: true },
+    });
   }
 
-  private async ensureTranslation(id: number) {
-    const exists = await this.prisma.legalTranslation.findUnique({ where: { id } });
-    if (!exists) throw new NotFoundException('Legal translation not found');
+  /**
+   * The "checklist" the mobile app shows on first launch / after a
+   * new version is published. Returns every active document the user
+   * has NOT yet accepted. Empty array → user is fully up-to-date.
+   */
+  async listPendingConsents(userId: number) {
+    const activeDocs = await this.prisma.legalDocument.findMany({
+      where: { isActive: true },
+      orderBy: { type: 'asc' },
+    });
+    if (activeDocs.length === 0) return [];
+
+    const accepted = await this.prisma.userConsent.findMany({
+      where: { userId, documentId: { in: activeDocs.map((d) => d.id) } },
+      select: { documentId: true },
+    });
+    const acceptedSet = new Set(accepted.map((c) => c.documentId));
+    return activeDocs.filter((d) => !acceptedSet.has(d.id));
+  }
+
+  /** Accept one or more documents in a single call (idempotent). */
+  async acceptConsents(
+    userId: number,
+    documentIds: number[],
+    meta: { ipAddress?: string; userAgent?: string },
+  ) {
+    const docs = await this.prisma.legalDocument.findMany({
+      where: { id: { in: documentIds } },
+      select: { id: true, isActive: true },
+    });
+    if (docs.length !== documentIds.length) {
+      throw new NotFoundException('One or more documents do not exist');
+    }
+    const inactive = docs.filter((d) => !d.isActive).map((d) => d.id);
+    if (inactive.length > 0) {
+      throw new ConflictException(
+        `Cannot accept inactive document(s): ${inactive.join(', ')}`,
+      );
+    }
+
+    // upsert per document — re-accepting is a no-op
+    await this.prisma.$transaction(
+      documentIds.map((documentId) =>
+        this.prisma.userConsent.upsert({
+          where: { userId_documentId: { userId, documentId } },
+          update: {},
+          create: {
+            userId,
+            documentId,
+            ipAddress: meta.ipAddress?.slice(0, 45) ?? null,
+            userAgent: meta.userAgent?.slice(0, 500) ?? null,
+          },
+        }),
+      ),
+    );
+
+    return this.listMyConsents(userId);
+  }
+
+  // ─── Helpers ───────────────────────────────────────────────────────
+
+  private async ensureDocument(id: number) {
+    const doc = await this.prisma.legalDocument.findUnique({ where: { id } });
+    if (!doc) throw new NotFoundException('Legal document not found');
+    return doc;
   }
 }

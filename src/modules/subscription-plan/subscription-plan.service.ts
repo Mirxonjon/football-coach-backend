@@ -1,7 +1,9 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '@/modules/prisma/prisma.service';
 import { CreateSubscriptionPlanDto } from '@/types/subscription-plan/create-subscription-plan.dto';
 import { UpdateSubscriptionPlanDto } from '@/types/subscription-plan/update-subscription-plan.dto';
+import { PlanFeatureDto } from '@/types/subscription-plan/plan-feature.dto';
 
 @Injectable()
 export class SubscriptionPlanService {
@@ -21,12 +23,29 @@ export class SubscriptionPlanService {
   }
 
   async create(dto: CreateSubscriptionPlanDto) {
-    return this.prisma.subscriptionPlan.create({ data: dto });
+    const { features, ...rest } = dto;
+    return this.prisma.subscriptionPlan.create({
+      data: {
+        ...rest,
+        ...(features !== undefined && {
+          features: this.toJsonFeatures(features),
+        }),
+      },
+    });
   }
 
   async update(id: number, dto: UpdateSubscriptionPlanDto) {
     await this.findById(id);
-    return this.prisma.subscriptionPlan.update({ where: { id }, data: dto });
+    const { features, ...rest } = dto;
+    return this.prisma.subscriptionPlan.update({
+      where: { id },
+      data: {
+        ...rest,
+        ...(features !== undefined && {
+          features: this.toJsonFeatures(features),
+        }),
+      },
+    });
   }
 
   async softDelete(id: number) {
@@ -35,5 +54,13 @@ export class SubscriptionPlanService {
       where: { id },
       data: { isActive: false },
     });
+  }
+
+  private toJsonFeatures(features: PlanFeatureDto[]): Prisma.InputJsonValue {
+    return features.map((f) => ({
+      uz: f.uz,
+      ru: f.ru,
+      ...(f.highlight !== undefined && { highlight: f.highlight }),
+    })) as unknown as Prisma.InputJsonValue;
   }
 }

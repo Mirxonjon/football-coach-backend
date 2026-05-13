@@ -25,6 +25,9 @@ enum NotificationType {
   BOOK
   SUBSCRIPTION
   AI_CHAT
+  PAYMENT
+  MASTERCLASS
+  OTHER
 }
 
 enum BlockType {
@@ -44,6 +47,19 @@ enum BookCategoryType {
 enum AiMessageRole {
   user
   assistant
+}
+
+enum LegalDocumentType {
+  PRIVACY_POLICY
+  TERMS_OF_SERVICE
+  OFFER_AGREEMENT
+  REQUISITES
+}
+
+enum UserLanguage {
+  UZ
+  RU
+  EN
 }
 
 model Role {
@@ -66,6 +82,7 @@ model User {
   avatarUrl  String?
   isVerified Boolean   @default(false)
   isActive   Boolean   @default(true)
+  language   UserLanguage @default(UZ)
   roleId     Int
   role       Role      @relation(fields: [roleId], references: [id])
 
@@ -81,6 +98,7 @@ model User {
   devices        UserDevice[]
   aiChats        AiChat[]
   aiRateLimits   AiRateLimit[]
+  consents       UserConsent[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -153,14 +171,19 @@ model Notification {
 }
 
 model Card {
-  id        Int      @id
-  userId    Int      @unique
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  token     String
-  last4     String   @db.VarChar(4)
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id          Int      @id
+  userId      Int      @unique
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider    String   @default("click")
+  token       String
+  cardNumber  String?  @db.VarChar(19)
+  last4       String   @db.VarChar(4)
+  expireDate  String?  @db.VarChar(4)
+  phoneNumber String?  @db.VarChar(20)
+  isActive    Boolean  @default(true)
+  isVerified  Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   walletTx WalletTransaction[]
 }
@@ -201,6 +224,7 @@ model SubscriptionPlan {
   discountPercent    Int          @default(0)
   fixedDiscountPrice Float?
   isActive           Boolean      @default(true)
+  features           Json         @default("[]")
 
   subscriptions Subscription[]
   walletTx      WalletTransaction[]
@@ -218,6 +242,10 @@ model Subscription {
   startDate            DateTime
   endDate              DateTime
   isActive             Boolean          @default(true)
+  autoPay              Boolean          @default(false)
+  cardId               Int?
+  lastRenewalAttemptAt DateTime?
+  lastExpiryNoticeDay  Int?
   subscriptionsPlansId Int
   subscriptionsPlan    SubscriptionPlan @relation(fields: [subscriptionsPlansId], references: [id])
 
@@ -333,6 +361,7 @@ model TrainingLesson {
   trainingCategory   TrainingCategory @relation(fields: [trainingCategoryId], references: [id])
   titleUz            String           @db.VarChar(200)
   titleRu            String           @db.VarChar(200)
+  isFree             Boolean          @default(false)
 
   lessonBlocks   LessonBlock[]
   lessonProgress LessonProgress[]
@@ -368,11 +397,56 @@ model LessonBlock {
   contentRu     String
   duration      Int?
   sequenceOrder Int
+  isFree        Boolean        @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([lessonId])
+  @@index([sequenceOrder])
+}
+
+model MasterclassCategory {
+  id            Int           @id @default(autoincrement())
+  titleUz       String        @db.VarChar(200)
+  titleRu       String        @db.VarChar(200)
+  descriptionUz String
+  descriptionRu String
+  imageUrl      String?
+  masterclasses Masterclass[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Masterclass {
+  id                    Int                 @id @default(autoincrement())
+  masterclassCategoryId Int
+  masterclassCategory   MasterclassCategory @relation(fields: [masterclassCategoryId], references: [id])
+  titleUz               String              @db.VarChar(200)
+  titleRu               String              @db.VarChar(200)
+  blocks                MasterclassBlock[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([masterclassCategoryId])
+}
+
+model MasterclassBlock {
+  id            Int         @id @default(autoincrement())
+  masterclassId Int
+  masterclass   Masterclass @relation(fields: [masterclassId], references: [id], onDelete: Cascade)
+  blockType     BlockType
+  contentUz     String
+  contentRu     String
+  duration      Int?
+  sequenceOrder Int
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([masterclassId])
   @@index([sequenceOrder])
 }
 
@@ -425,4 +499,50 @@ model AiRateLimit {
   @@unique([userId, ipAddress])
   @@index([userId])
   @@index([ipAddress])
+}
+
+// ─── Legal documents (Privacy, Terms, Offer, Requisites) ──────────
+// Each document type can have multiple versions over time. Only the
+// row with isActive=true and the highest `version` per type is the
+// "current" one shown to users. UserConsent ties a user to the exact
+// version they accepted, so we can re-prompt them when a new version
+// is published.
+
+model LegalDocument {
+  id          Int               @id @default(autoincrement())
+  type        LegalDocumentType
+  version     Int               @default(1)
+  titleUz     String            @db.VarChar(200)
+  titleRu     String            @db.VarChar(200)
+  contentUz   String
+  contentRu   String
+  isActive    Boolean           @default(true)
+  publishedAt DateTime          @default(now())
+
+  consents UserConsent[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([type, version])
+  @@index([type])
+  @@index([isActive])
+}
+
+model UserConsent {
+  id         Int           @id @default(autoincrement())
+  userId     Int
+  user       User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  documentId Int
+  document   LegalDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  acceptedAt DateTime      @default(now())
+  ipAddress  String?       @db.VarChar(45)
+  userAgent  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, documentId])
+  @@index([userId])
+  @@index([documentId])
 }

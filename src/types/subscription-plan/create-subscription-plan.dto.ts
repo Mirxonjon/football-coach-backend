@@ -1,5 +1,19 @@
-import { IsString, IsInt, IsEnum, IsNumber, IsOptional, IsBoolean, Min, Max } from 'class-validator';
+import {
+  IsString,
+  IsInt,
+  IsEnum,
+  IsNumber,
+  IsOptional,
+  IsBoolean,
+  Min,
+  Max,
+  IsArray,
+  ValidateNested,
+  ArrayMaxSize,
+} from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { PlanFeatureDto } from './plan-feature.dto';
 
 export enum DiscountType {
   NONE = 'NONE',
@@ -56,4 +70,20 @@ export class CreateSubscriptionPlanDto {
   @IsBoolean()
   @IsOptional()
   isActive?: boolean;
+
+  @ApiPropertyOptional({
+    type: [PlanFeatureDto],
+    description:
+      'Bilingual feature rows shown as a checklist on the pricing card. Order is preserved.',
+    example: [
+      { uz: 'Cheksiz darslar', ru: 'Безлимитные уроки' },
+      { uz: '24/7 qo‘llab-quvvatlash', ru: 'Поддержка 24/7', highlight: true },
+    ],
+  })
+  @IsArray()
+  @ArrayMaxSize(20)
+  @ValidateNested({ each: true })
+  @Type(() => PlanFeatureDto)
+  @IsOptional()
+  features?: PlanFeatureDto[];
 }

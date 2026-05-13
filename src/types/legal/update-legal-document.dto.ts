@@ -1,20 +1,4 @@
-import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsEnum, IsOptional, IsString } from 'class-validator';
-import { LegalDocumentType } from '@prisma/client';
+import { PartialType } from '@nestjs/swagger';
+import { CreateLegalDocumentDto } from './create-legal-document.dto';
 
-export class UpdateLegalDocumentDto {
-  @ApiPropertyOptional({ enum: ['TERMS','PRIVACY'] })
-  @IsOptional()
-  @IsEnum(LegalDocumentType)
-  type?: LegalDocumentType;
-
-  @ApiPropertyOptional({ example: '1.1' })
-  @IsOptional()
-  @IsString()
-  version?: string;
-
-  @ApiPropertyOptional({ example: true })
-  @IsOptional()
-  @IsBoolean()
-  isActive?: boolean;
-}
+export class UpdateLegalDocumentDto extends PartialType(CreateLegalDocumentDto) {}

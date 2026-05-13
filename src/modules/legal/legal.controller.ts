@@ -1,110 +1,151 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseIntPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { LegalService } from './legal.service';
-import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard';
-import { RolesGuard } from '@/modules/auth/guards/roles.guard';
-import { Roles } from '@/modules/auth/decorators/roles.decorator';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  ParseBoolPipe,
+  ParseEnumPipe,
+  ParseIntPipe,
+  Patch,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiQuery,
+  ApiTags,
+} from '@nestjs/swagger';
+import { LegalDocumentType } from '@prisma/client';
+import { Request } from 'express';
 import { Public } from '@/common/decorators/public.decorator';
+import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard';
+import { Roles } from '@/modules/auth/decorators/roles.decorator';
+import { LegalService } from './legal.service';
 import { CreateLegalDocumentDto } from '@/types/legal/create-legal-document.dto';
 import { UpdateLegalDocumentDto } from '@/types/legal/update-legal-document.dto';
-import { FilterLegalDocumentDto } from '@/types/legal/filter-legal-document.dto';
-import { CreateLegalTranslationDto } from '@/types/legal/create-legal-translation.dto';
-import { UpdateLegalTranslationDto } from '@/types/legal/update-legal-translation.dto';
-import { Language, LegalDocumentType } from '@prisma/client';
+import { AcceptConsentDto } from '@/types/legal/accept-consent.dto';
 
 @ApiTags('Legal')
-@Controller('legal')
+@Controller()
 export class LegalController {
-  constructor(private readonly legalService: LegalService) { }
+  constructor(private readonly legalService: LegalService) {}
 
-  // ADMIN — Documents
-  @Post()
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('ADMIN')
+  // ─── Public — used by web footer & mobile consent screen ─────────
+
+  @Public()
+  @Get('legal/documents')
+  @ApiOperation({
+    summary:
+      'List the active version of every legal document type (privacy, terms, offer, requisites). One row per type.',
+  })
+  listActive() {
+    return this.legalService.listActive();
+  }
+
+  @Public()
+  @Get('legal/documents/:type')
+  @ApiOperation({
+    summary:
+      'Get the full content of the active document for a given type.',
+  })
+  getActiveByType(
+    @Param('type', new ParseEnumPipe(LegalDocumentType))
+    type: LegalDocumentType,
+  ) {
+    return this.legalService.getActiveByType(type);
+  }
+
+  // ─── User — consent flow (mobile app uses these) ─────────────────
+
+  @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Create legal document (ADMIN)' })
-  createDocument(@Body() dto: CreateLegalDocumentDto) {
+  @Get('me/consents')
+  @ApiOperation({ summary: 'Documents the current user has accepted' })
+  myConsents(@Req() req: Request) {
+    const userId = (req as any).user.sub as number;
+    return this.legalService.listMyConsents(userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Get('me/consents/pending')
+  @ApiOperation({
+    summary:
+      'Documents the user still needs to accept. Empty array → fully consented. Mobile app shows the consent screen iff this is non-empty.',
+  })
+  pendingConsents(@Req() req: Request) {
+    const userId = (req as any).user.sub as number;
+    return this.legalService.listPendingConsents(userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Post('me/consents')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Accept one or more documents in a single call. Idempotent — re-accepting the same document is a no-op.',
+  })
+  acceptConsents(@Req() req: Request, @Body() dto: AcceptConsentDto) {
+    const userId = (req as any).user.sub as number;
+    return this.legalService.acceptConsents(userId, dto.documentIds, {
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent'],
+    });
+  }
+
+  // ─── Admin CRUD ──────────────────────────────────────────────────
+
+  @ApiBearerAuth()
+  @Roles('ADMIN')
+  @Get('admin/legal/documents')
+  @ApiOperation({ summary: 'Full version history of every legal document' })
+  @ApiQuery({ name: 'type', required: false, enum: LegalDocumentType })
+  @ApiQuery({ name: 'isActive', required: false, type: Boolean })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  listAll(
+    @Query('type') type?: LegalDocumentType,
+    @Query('isActive', new ParseBoolPipe({ optional: true })) isActive?: boolean,
+    @Query('page', new ParseIntPipe({ optional: true })) page?: number,
+    @Query('limit', new ParseIntPipe({ optional: true })) limit?: number,
+  ) {
+    return this.legalService.listAll({ type, isActive, page, limit });
+  }
+
+  @ApiBearerAuth()
+  @Roles('ADMIN')
+  @Post('admin/legal/documents')
+  @ApiOperation({
+    summary:
+      'Publish a new version. If isActive=true (default), previous active version of this type is auto-deactivated and version is auto-incremented.',
+  })
+  create(@Body() dto: CreateLegalDocumentDto) {
     return this.legalService.createDocument(dto);
   }
 
-  @Patch(':id')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('ADMIN')
   @ApiBearerAuth()
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Update legal document (ADMIN)' })
-  updateDocument(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateLegalDocumentDto) {
+  @Roles('ADMIN')
+  @Patch('admin/legal/documents/:id')
+  @ApiOperation({ summary: 'Edit an existing document (does not bump version)' })
+  update(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateLegalDocumentDto,
+  ) {
     return this.legalService.updateDocument(id, dto);
   }
 
-  @Delete(':id')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('ADMIN')
   @ApiBearerAuth()
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Delete legal document (ADMIN)' })
-  deleteDocument(@Param('id', ParseIntPipe) id: number) {
+  @Roles('ADMIN')
+  @Delete('admin/legal/documents/:id')
+  @ApiOperation({ summary: 'Delete a document (must be inactive first)' })
+  delete(@Param('id', ParseIntPipe) id: number) {
     return this.legalService.deleteDocument(id);
-  }
-
-  @Get()
-  // @UseGuards(JwtAuthGuard, RolesGuard)
-  // @Roles('ADMIN')
-  // @ApiBearerAuth()
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'List legal documents (ADMIN)' })
-  @ApiQuery({ name: 'type', required: false, enum: ['TERMS', 'PRIVACY'] })
-  @ApiQuery({ name: 'isActive', required: false, type: Boolean })
-  @ApiQuery({ name: 'version', required: false, type: String })
-  @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })
-  @ApiQuery({ name: 'limit', required: false, type: Number, example: 10 })
-  listDocuments(@Query() query: FilterLegalDocumentDto) {
-    return this.legalService.listDocuments(query);
-  }
-
-  // ADMIN — Translations
-  @Post(':id/translation')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('ADMIN')
-  @ApiBearerAuth()
-  @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Create translation for a document (ADMIN)' })
-  createTranslation(
-    @Param('id', ParseIntPipe) id: number,
-    @Body() dto: CreateLegalTranslationDto,
-  ) {
-    return this.legalService.createTranslation(id, dto);
-  }
-
-  @Patch('translation/:id')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('ADMIN')
-  @ApiBearerAuth()
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Update translation (ADMIN)' })
-  updateTranslation(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateLegalTranslationDto) {
-    return this.legalService.updateTranslation(id, dto);
-  }
-
-  @Delete('translation/:id')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('ADMIN')
-  @ApiBearerAuth()
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Delete translation (ADMIN)' })
-  deleteTranslation(@Param('id', ParseIntPipe) id: number) {
-    return this.legalService.deleteTranslation(id);
-  }
-
-  // PUBLIC
-  @Public()
-  @Get('public')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Get public legal document by type and language' })
-  @ApiQuery({ name: 'type', required: true, enum: ['TERMS', 'PRIVACY'] })
-  @ApiQuery({ name: 'lang', required: true, enum: ['UZ', 'RU', 'EN'] })
-  publicGet(@Query('type') type: LegalDocumentType, @Query('lang') lang: Language) {
-    return this.legalService.publicGet(type, lang);
   }
 }

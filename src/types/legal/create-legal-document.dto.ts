@@ -1,43 +1,35 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
-import { IsArray, IsBoolean, IsEnum, IsNotEmpty, IsOptional, IsString, ValidateNested } from 'class-validator';
-import { LegalDocumentType, Language } from '@prisma/client';
-
-class TranslationInputDto {
-  @ApiProperty({ enum: ['UZ','RU','EN'] })
-  @IsEnum(Language)
-  language: Language;
-
-  @ApiProperty({ example: 'Foydalanish shartlari' })
-  @IsString()
-  @IsNotEmpty()
-  title: string;
-
-  @ApiProperty({ example: '<p>...</p>' })
-  @IsString()
-  @IsNotEmpty()
-  content: string;
-}
+import { IsBoolean, IsEnum, IsOptional, IsString, MaxLength } from 'class-validator';
+import { LegalDocumentType } from '@prisma/client';
 
 export class CreateLegalDocumentDto {
-  @ApiProperty({ enum: ['TERMS','PRIVACY'] })
+  @ApiProperty({ enum: LegalDocumentType, example: LegalDocumentType.PRIVACY_POLICY })
   @IsEnum(LegalDocumentType)
   type: LegalDocumentType;
 
-  @ApiProperty({ example: '1.0' })
+  @ApiProperty({ example: 'Maxfiylik siyosati' })
   @IsString()
-  @IsNotEmpty()
-  version: string;
+  @MaxLength(200)
+  titleUz: string;
 
-  @ApiPropertyOptional({ example: true })
+  @ApiProperty({ example: 'Политика конфиденциальности' })
+  @IsString()
+  @MaxLength(200)
+  titleRu: string;
+
+  @ApiProperty({ description: 'Markdown or HTML body in UZ' })
+  @IsString()
+  contentUz: string;
+
+  @ApiProperty({ description: 'Markdown or HTML body in RU' })
+  @IsString()
+  contentRu: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Defaults to true. When true, the previously active document of the same type is automatically deactivated and version is incremented.',
+  })
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
-
-  @ApiPropertyOptional({ type: [TranslationInputDto] })
-  @IsOptional()
-  @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => TranslationInputDto)
-  translations?: TranslationInputDto[];
 }

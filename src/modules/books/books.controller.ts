@@ -23,6 +23,7 @@ import { UpdateBookCategoryDto } from '@/types/books/update-book-category.dto';
 import { CreateBookDto } from '@/types/books/create-book.dto';
 import { UpdateBookDto } from '@/types/books/update-book.dto';
 import { FilterBookDto } from '@/types/books/filter-book.dto';
+import { FilterBookCategoryDto } from '@/types/books/filter-book-category.dto';
 import { PurchaseBookDto } from '@/types/books/purchase-book.dto';
 import { UpdateProgressDto } from '@/types/books/update-progress.dto';
 import { Request } from 'express';
@@ -39,13 +40,20 @@ export class BooksController {
   @Public()
   @Get('book-categories')
   @ApiOperation({ summary: 'List all book categories' })
-  findAllCategories() {
-    return this.booksService.findAllCategories();
+  findAllCategories(@Query() filter: FilterBookCategoryDto) {
+    return this.booksService.findAllCategories(filter);
   }
 
   @Public()
   @Get('books')
-  @ApiOperation({ summary: 'List books with optional filters' })
+  @ApiOperation({
+    summary:
+      'List books with pagination, filters and sort. Default page=1, limit=12, sortOrder=desc.',
+    description:
+      'Filters: categoryId, categoryType (BOOK|KONSPEKT), search (UZ/RU title), hasDiscount, isFree (basePrice=0). ' +
+      'Sort: sortBy=id|createdAt|basePrice, sortOrder=asc|desc. ' +
+      'Pass `all=true` to skip pagination.',
+  })
   findAllBooks(@Query() filter: FilterBookDto) {
     return this.booksService.findAllBooks(filter);
   }
@@ -121,14 +129,43 @@ export class BooksController {
   }
 
   @Post('me/books/:bookId/purchase')
-  @ApiOperation({ summary: 'Purchase a book' })
+  @ApiOperation({
+    summary:
+      'Purchase a book — charges the saved Click card. If the user has exactly one verified card, cardId is optional; otherwise pass cardId in the body.',
+  })
   purchaseBook(
     @Param('bookId', ParseIntPipe) bookId: number,
-    @Body() _dto: PurchaseBookDto,
+    @Body() dto: PurchaseBookDto,
     @Req() req: Request,
   ) {
     const userId = (req as any).user.sub as number;
-    return this.booksService.purchaseBook(userId, bookId);
+    return this.booksService.purchaseBook(userId, bookId, dto.cardId);
+  }
+
+  @Get('me/books/:bookId/download')
+  @ApiOperation({
+    summary:
+      'Get a fresh short-lived download URL for an already-purchased book (valid 1 hour, regenerable on demand).',
+  })
+  downloadBook(
+    @Param('bookId', ParseIntPipe) bookId: number,
+    @Req() req: Request,
+  ) {
+    const userId = (req as any).user.sub as number;
+    return this.booksService.getDownloadUrl(userId, bookId);
+  }
+
+  @Post('me/books/:bookId/dev-grant')
+  @ApiOperation({
+    summary:
+      'DEV-ONLY: grant a book without charging (skips Click). Disabled when NODE_ENV=production.',
+  })
+  devGrantBook(
+    @Param('bookId', ParseIntPipe) bookId: number,
+    @Req() req: Request,
+  ) {
+    const userId = (req as any).user.sub as number;
+    return this.booksService.devGrantBook(userId, bookId);
   }
 
   // ─── User: Progress ───

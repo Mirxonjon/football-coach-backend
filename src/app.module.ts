@@ -28,6 +28,9 @@ import { SubscriptionModule } from './modules/subscription/subscription.module';
 import { SubscriptionPlanModule } from './modules/subscription-plan/subscription-plan.module';
 import { HealthModule } from './modules/health/health.module';
 import { StatsModule } from './modules/stats/stats.module';
+import { MasterclassCategoryModule } from './modules/masterclass-category/masterclass-category.module';
+import { MasterclassModule } from './modules/masterclass/masterclass.module';
+import { LegalModule } from './modules/legal/legal.module';
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -52,6 +55,9 @@ import { StatsModule } from './modules/stats/stats.module';
     SubscriptionPlanModule,
     HealthModule,
     StatsModule,
+    MasterclassCategoryModule,
+    MasterclassModule,
+    LegalModule,
   ],
   providers: [
     {

@@ -1,7 +1,9 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
+  Logger,
   UnauthorizedException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
@@ -33,7 +35,16 @@ const REFRESH_EXPIRES_DAYS = parseInt(process.env.REFRESH_TOKEN_TTL_DAYS || '30'
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
   private googleClient: OAuth2Client;
+
+  // Web (regular user) and Admin panel use SEPARATE Google OAuth client IDs.
+  // Each id_token's `aud` claim must match the client id that issued it, so we
+  // verify against the matching audience per flow.
+  private readonly googleWebClientId =
+    process.env.GOOGLE_WEB_CLIENT_ID || process.env.GOOGLE_CLIENT_ID || '';
+  private readonly googleAdminClientId =
+    process.env.GOOGLE_ADMIN_CLIENT_ID || process.env.GOOGLE_CLIENT_ID || '';
 
   constructor(
     private prisma: PrismaService,
@@ -41,7 +52,26 @@ export class AuthService {
     private otpService: OtpService,
     private smsService: SmsService,
   ) {
-    this.googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+    // The OAuth2Client object itself does not enforce aud — we pass `audience`
+    // to verifyIdToken explicitly per call. Constructor arg is only used when
+    // exchanging codes (not our flow), so any of the configured ids is fine.
+    this.googleClient = new OAuth2Client(
+      this.googleWebClientId || this.googleAdminClientId,
+    );
+    if (!this.googleWebClientId) {
+      this.logger.warn(
+        'GOOGLE_WEB_CLIENT_ID is not set — /auth/google will reject every token',
+      );
+    }
+    if (!this.googleAdminClientId) {
+      this.logger.warn(
+        'GOOGLE_ADMIN_CLIENT_ID is not set — /admin/google will reject every token',
+      );
+    }
+  }
+
+  private fmtDevice(d: DeviceInfo) {
+    return `${d?.ip ?? '?'} | ${d?.userAgent ?? '?'}`;
   }
 
   // ─── Phone OTP ───────────────────────────────────────────────
@@ -52,10 +82,16 @@ export class AuthService {
     const user = await this.prisma.user.findUnique({ where: { phone: dto.phone } });
     const code = await this.otpService.generateAndStoreOtp(dto.phone, user?.id);
 
+    this.logger.log(
+      `[PHONE-OTP] request phone=${dto.phone} userId=${user?.id ?? 'new'}`,
+    );
+
     try {
       await this.smsService.sendOtp(dto.phone, code);
-    } catch {
-      // swallow provider errors
+    } catch (e: any) {
+      this.logger.warn(
+        `[PHONE-OTP] sms send failed phone=${dto.phone} err=${e?.message}`,
+      );
     }
 
     return { ttlSec: parseInt(process.env.OTP_TTL_MINUTES || '5') * 60 };
@@ -63,9 +99,15 @@ export class AuthService {
 
   async phoneVerifyOtp(dto: PhoneVerifyOtpDto, device: DeviceInfo) {
     const ok = await this.otpService.verifyOtp(dto.phone, dto.code);
-    if (!ok) throw new UnauthorizedException('Invalid or expired OTP');
+    if (!ok) {
+      this.logger.warn(
+        `[PHONE-OTP] ✗ invalid code phone=${dto.phone} device=${this.fmtDevice(device)}`,
+      );
+      throw new UnauthorizedException('Invalid or expired OTP');
+    }
 
     let user = await this.prisma.user.findUnique({ where: { phone: dto.phone } });
+    const isNew = !user;
     if (!user) {
       const role = await this.ensureRole('USER');
       user = await this.prisma.user.create({
@@ -76,6 +118,9 @@ export class AuthService {
     }
 
     const tokens = await this.issueTokensAndPersistSession(user.id, device);
+    this.logger.log(
+      `[PHONE-OTP] ✓ login userId=${user.id} phone=${user.phone} ${isNew ? '(new user)' : ''} device=${this.fmtDevice(device)}`,
+    );
     return { ...tokens, user: this.sanitizeUser(user) };
   }
 
@@ -83,7 +128,10 @@ export class AuthService {
 
   async emailRegister(dto: EmailRegisterDto, device: DeviceInfo) {
     const existing = await this.prisma.user.findUnique({ where: { email: dto.email } });
-    if (existing) throw new ConflictException('Email already registered');
+    if (existing) {
+      this.logger.warn(`[EMAIL-REG] ✗ already exists email=${dto.email}`);
+      throw new ConflictException('Email already registered');
+    }
 
     const role = await this.ensureRole('USER');
     const hash = await bcrypt.hash(dto.password, 12);
@@ -100,36 +148,90 @@ export class AuthService {
     });
 
     const tokens = await this.issueTokensAndPersistSession(user.id, device);
+    this.logger.log(
+      `[EMAIL-REG] ✓ new user userId=${user.id} email=${user.email} device=${this.fmtDevice(device)}`,
+    );
     return { ...tokens, user: this.sanitizeUser(user) };
   }
 
   async emailLogin(dto: EmailLoginDto, device: DeviceInfo) {
     const user = await this.prisma.user.findUnique({ where: { email: dto.email } });
-    if (!user || !user.password) throw new UnauthorizedException('Invalid credentials');
-    if (!user.isActive) throw new UnauthorizedException('Account deactivated');
+    if (!user || !user.password) {
+      this.logger.warn(
+        `[EMAIL-LOGIN] ✗ not found / no password email=${dto.email} device=${this.fmtDevice(device)}`,
+      );
+      throw new UnauthorizedException('Invalid credentials');
+    }
+    if (!user.isActive) {
+      this.logger.warn(
+        `[EMAIL-LOGIN] ✗ deactivated userId=${user.id} email=${user.email}`,
+      );
+      throw new UnauthorizedException('Account deactivated');
+    }
 
     const match = await bcrypt.compare(dto.password, user.password);
-    if (!match) throw new UnauthorizedException('Invalid credentials');
+    if (!match) {
+      this.logger.warn(
+        `[EMAIL-LOGIN] ✗ wrong password userId=${user.id} email=${user.email} device=${this.fmtDevice(device)}`,
+      );
+      throw new UnauthorizedException('Invalid credentials');
+    }
 
     const tokens = await this.issueTokensAndPersistSession(user.id, device);
+    this.logger.log(
+      `[EMAIL-LOGIN] ✓ userId=${user.id} email=${user.email} device=${this.fmtDevice(device)}`,
+    );
     return { ...tokens, user: this.sanitizeUser(user) };
   }
 
   // ─── Google ──────────────────────────────────────────────────
 
   async googleAuth(dto: GoogleAuthDto, device: DeviceInfo) {
-    const ticket = await this.googleClient.verifyIdToken({
-      idToken: dto.idToken,
-      audience: process.env.GOOGLE_CLIENT_ID,
-    });
-    const payload = ticket.getPayload();
-    if (!payload || !payload.sub) throw new UnauthorizedException('Invalid Google token');
+    this.logger.log(
+      `[GOOGLE] attempt idToken.len=${dto.idToken?.length ?? 0} device=${this.fmtDevice(device)}`,
+    );
+
+    let payload;
+    try {
+      // Decode header (without verifying) to log token's aud — helps when the
+      // frontend uses the wrong client_id and we need to spot the mismatch.
+      const tokenAud = peekIdTokenAud(dto.idToken);
+      this.logger.log(
+        `[GOOGLE] expected aud=${this.googleWebClientId || '<empty>'} | token aud=${tokenAud ?? '<unparseable>'}`,
+      );
+
+      const ticket = await this.googleClient.verifyIdToken({
+        idToken: dto.idToken,
+        audience: this.googleWebClientId,
+      });
+      payload = ticket.getPayload();
+    } catch (e: any) {
+      this.logger.warn(
+        `[GOOGLE] ✗ token verify failed err=${e?.message} device=${this.fmtDevice(device)}`,
+      );
+      throw new UnauthorizedException('Invalid Google token');
+    }
+
+    if (!payload || !payload.sub) {
+      this.logger.warn(`[GOOGLE] ✗ empty payload device=${this.fmtDevice(device)}`);
+      throw new UnauthorizedException('Invalid Google token');
+    }
+
+    this.logger.log(
+      `[GOOGLE] token ok sub=${payload.sub} email=${payload.email} name="${payload.given_name ?? ''} ${payload.family_name ?? ''}" emailVerified=${payload.email_verified}`,
+    );
 
     let user = await this.prisma.user.findUnique({ where: { googleId: payload.sub } });
+    let action: 'login' | 'linked' | 'registered' = 'login';
+
     if (!user && payload.email) {
       user = await this.prisma.user.findUnique({ where: { email: payload.email } });
       if (user) {
-        await this.prisma.user.update({ where: { id: user.id }, data: { googleId: payload.sub } });
+        await this.prisma.user.update({
+          where: { id: user.id },
+          data: { googleId: payload.sub },
+        });
+        action = 'linked';
       }
     }
 
@@ -147,11 +249,20 @@ export class AuthService {
           roleId: role.id,
         },
       });
+      action = 'registered';
     }
 
-    if (!user.isActive) throw new UnauthorizedException('Account deactivated');
+    if (!user.isActive) {
+      this.logger.warn(
+        `[GOOGLE] ✗ deactivated userId=${user.id} email=${user.email}`,
+      );
+      throw new UnauthorizedException('Account deactivated');
+    }
 
     const tokens = await this.issueTokensAndPersistSession(user.id, device);
+    this.logger.log(
+      `[GOOGLE] ✓ ${action} userId=${user.id} email=${user.email} sub=${payload.sub} device=${this.fmtDevice(device)}`,
+    );
     return { ...tokens, user: this.sanitizeUser(user) };
   }
 
@@ -164,6 +275,9 @@ export class AuthService {
         secret: process.env.JWT_SECRET || process.env.JWT_SECRET_KEY || 'secret-key',
       });
     } catch {
+      this.logger.warn(
+        `[REFRESH] ✗ invalid/expired jwt device=${this.fmtDevice(device)}`,
+      );
       throw new UnauthorizedException('Invalid refresh token');
     }
 
@@ -180,14 +294,170 @@ export class AuthService {
       }
     }
 
-    if (!matched) throw new UnauthorizedException('Invalid refresh token');
+    if (!matched) {
+      this.logger.warn(
+        `[REFRESH] ✗ no session match userId=${payload.sub} device=${this.fmtDevice(device)}`,
+      );
+      throw new UnauthorizedException('Invalid refresh token');
+    }
 
     await this.prisma.session.delete({ where: { id: matched.id } });
+    this.logger.log(
+      `[REFRESH] ✓ userId=${payload.sub} sessionId=${matched.id} device=${this.fmtDevice(device)}`,
+    );
     return this.issueTokensAndPersistSession(payload.sub, device);
   }
 
   async logout(userId: number) {
-    await this.prisma.session.deleteMany({ where: { userId } });
+    const res = await this.prisma.session.deleteMany({ where: { userId } });
+    this.logger.log(`[LOGOUT] userId=${userId} sessionsRemoved=${res.count}`);
+  }
+
+  // ─── Admin-only login (STRICT: never creates a user) ─────────
+  /**
+   * Admin login by phone + password. Unlike user sign-in flows, this NEVER
+   * auto-creates a user and NEVER upgrades anyone. The account must already
+   * exist with role ADMIN, otherwise 401 is returned.
+   */
+  async adminLogin(
+    dto: { phone?: string; email?: string; password: string },
+    device: DeviceInfo,
+  ) {
+    if (!dto.phone && !dto.email) {
+      throw new UnauthorizedException('Provide phone or email');
+    }
+
+    const user = dto.email
+      ? await this.prisma.user.findUnique({
+          where: { email: dto.email },
+          include: { role: true },
+        })
+      : await this.prisma.user.findUnique({
+          where: { phone: dto.phone! },
+          include: { role: true },
+        });
+
+    const identifier = dto.email ?? dto.phone;
+
+    if (!user || !user.password) {
+      this.logger.warn(
+        `[ADMIN-LOGIN] ✗ not found identifier=${identifier} device=${this.fmtDevice(device)}`,
+      );
+      throw new UnauthorizedException('Invalid credentials');
+    }
+    if (!user.isActive) {
+      this.logger.warn(`[ADMIN-LOGIN] ✗ deactivated userId=${user.id}`);
+      throw new UnauthorizedException('Account deactivated');
+    }
+    if (user.role?.name !== 'ADMIN') {
+      this.logger.warn(
+        `[ADMIN-LOGIN] ✗ not an admin userId=${user.id} role=${user.role?.name}`,
+      );
+      throw new UnauthorizedException('Admin access required');
+    }
+
+    const match = await bcrypt.compare(dto.password, user.password);
+    if (!match) {
+      this.logger.warn(
+        `[ADMIN-LOGIN] ✗ wrong password userId=${user.id} device=${this.fmtDevice(device)}`,
+      );
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    const tokens = await this.issueTokensAndPersistSession(user.id, device);
+    this.logger.log(
+      `[ADMIN-LOGIN] ✓ userId=${user.id} via=${dto.email ? 'email' : 'phone'} identifier=${identifier} device=${this.fmtDevice(device)}`,
+    );
+    return { ...tokens, user: this.sanitizeUser(user) };
+  }
+
+  /**
+   * Admin Google login. Verifies the ID token, then requires the resolved
+   * user to already exist with role ADMIN. Will NOT create a new user and
+   * will NOT promote a regular user — unknown emails are rejected outright.
+   */
+  async adminGoogleAuth(dto: GoogleAuthDto, device: DeviceInfo) {
+    this.logger.log(
+      `[ADMIN-GOOGLE] attempt device=${this.fmtDevice(device)}`,
+    );
+
+    let payload;
+    try {
+      const ticket = await this.googleClient.verifyIdToken({
+        idToken: dto.idToken,
+        audience: this.googleAdminClientId,
+      });
+      payload = ticket.getPayload();
+    } catch (e: any) {
+      this.logger.warn(
+        `[ADMIN-GOOGLE] ✗ token verify failed err=${e?.message}`,
+      );
+      throw new UnauthorizedException({
+        error: 'INVALID_GOOGLE_TOKEN',
+        message: 'Invalid or expired Google token',
+      });
+    }
+    if (!payload?.sub) {
+      throw new UnauthorizedException({
+        error: 'INVALID_GOOGLE_TOKEN',
+        message: 'Invalid Google token',
+      });
+    }
+
+    // Strict lookup — googleId first, then email fallback. Never create.
+    let user = await this.prisma.user.findUnique({
+      where: { googleId: payload.sub },
+      include: { role: true },
+    });
+    if (!user && payload.email) {
+      user = await this.prisma.user.findUnique({
+        where: { email: payload.email },
+        include: { role: true },
+      });
+    }
+
+    if (!user) {
+      this.logger.warn(
+        `[ADMIN-GOOGLE] ✗ unknown account email=${payload.email} sub=${payload.sub}`,
+      );
+      throw new UnauthorizedException({
+        error: 'ADMIN_NOT_FOUND',
+        message: 'No admin account linked to this Google account',
+      });
+    }
+    if (!user.isActive) {
+      this.logger.warn(`[ADMIN-GOOGLE] ✗ deactivated userId=${user.id}`);
+      throw new UnauthorizedException({
+        error: 'ACCOUNT_DEACTIVATED',
+        message: 'Account deactivated',
+      });
+    }
+    if (user.role?.name !== 'ADMIN') {
+      this.logger.warn(
+        `[ADMIN-GOOGLE] ✗ not an admin userId=${user.id} role=${user.role?.name} email=${user.email}`,
+      );
+      throw new ForbiddenException({
+        error: 'NOT_ADMIN',
+        message: 'This account does not have admin access',
+      });
+    }
+
+    // Link googleId on the admin account if this is the first Google login.
+    if (!user.googleId) {
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: { googleId: payload.sub },
+      });
+      this.logger.log(
+        `[ADMIN-GOOGLE] linked google sub to admin userId=${user.id}`,
+      );
+    }
+
+    const tokens = await this.issueTokensAndPersistSession(user.id, device);
+    this.logger.log(
+      `[ADMIN-GOOGLE] ✓ userId=${user.id} email=${user.email} device=${this.fmtDevice(device)}`,
+    );
+    return { ...tokens, user: this.sanitizeUser(user) };
   }
 
   // ─── Password forgot / reset ─────────────────────────────────
@@ -252,5 +522,23 @@ export class AuthService {
       avatarUrl: user.avatarUrl,
       isVerified: user.isVerified,
     };
+  }
+}
+
+/**
+ * Decode a Google id_token's payload WITHOUT verifying signature, just to
+ * extract the `aud` claim for diagnostic logging. Never trust this value for
+ * auth decisions — the real verification happens via google-auth-library.
+ */
+function peekIdTokenAud(idToken: string): string | null {
+  try {
+    const parts = idToken.split('.');
+    if (parts.length < 2) return null;
+    const payload = JSON.parse(
+      Buffer.from(parts[1], 'base64').toString('utf8'),
+    );
+    return typeof payload?.aud === 'string' ? payload.aud : null;
+  } catch {
+    return null;
   }
 }
