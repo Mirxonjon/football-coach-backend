@@ -1,3 +1,19 @@
+// Load .env and build DATABASE_URL from DB_* parts BEFORE Prisma/Nest imports
+import * as dotenv from 'dotenv';
+dotenv.config();
+(function buildDatabaseUrl() {
+  const host = process.env.DB_HOST;
+  const port = process.env.DB_PORT;
+  const user = process.env.DB_USERNAME;
+  const pass = process.env.DB_PASSWORD;
+  const db = process.env.DATABASE;
+  if (host && port && user && pass && db) {
+    const encUser = encodeURIComponent(user);
+    const encPass = encodeURIComponent(pass);
+    process.env.DATABASE_URL = `postgresql://${encUser}:${encPass}@${host}:${port}/${db}?schema=public`;
+  }
+})();
+
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { useContainer } from 'class-validator';

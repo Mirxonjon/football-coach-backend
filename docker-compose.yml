@@ -1,58 +1,25 @@
 services:
-  postgres:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_DB: ${POSTGRES_DB:-football_coach}
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  minio:
-    image: minio/minio:latest
-    restart: unless-stopped
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
-    ports:
-      - "${MINIO_PORT:-9000}:9000"
-      - "9001:9001"
-    volumes:
-      - miniodata:/data
-    healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   api:
     build:
       context: .
       dockerfile: Dockerfile
+    container_name: football-api
     restart: unless-stopped
     ports:
-      - "${APP_PORT:-4021}:${APP_PORT:-4021}"
+      - "${APP_PORT:-4021}:4021"
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-football_coach}?schema=public
-      MINIO_ENDPOINT: minio
-      MINIO_PORT: 9000
-    depends_on:
-      postgres:
-        condition: service_healthy
-      minio:
-        condition: service_started
-
-volumes:
-  pgdata:
-  miniodata:
+      # Local postgres'ga "host.docker.internal" orqali ulanish.
+      # .env'dagi DB_HOST=localhost ni Docker ichida override qilamiz —
+      # qolgan DB_* qiymatlar (PORT, USER, PASS, DATABASE) .env'dan o'qiladi.
+      DB_HOST: host.docker.internal
+      APP_HOST: 0.0.0.0
+      APP_PORT: 4021
+      FIREBASE_CREDENTIALS_PATH: /app/firebase-credentials.json
+    volumes:
+      # Firebase service account — image ichiga kirmaydi, faqat read-only mount
+      - ./firebase-credentials.json:/app/firebase-credentials.json:ro
+    # Container ichidan host'ning postgres'iga ulanish uchun
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

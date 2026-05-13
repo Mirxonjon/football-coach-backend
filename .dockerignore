@@ -1,6 +1,22 @@
 node_modules
 dist
 .env
+.env.local
+.env.*.local
 .git
+.gitignore
 *.md
 docs
+
+# Firebase credentials — volume orqali ulanadi
+firebase-credentials.json
+firebase-key.json
+config/google-service-account.json
+
+# Local fayllar
+*.log
+logs
+coverage
+.vscode
+.idea
+test

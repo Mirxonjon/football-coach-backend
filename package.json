@@ -18,8 +18,13 @@
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
-    "prisma:seed": "prisma db seed",
-    "prisma:reset": "prisma migrate reset --force"
+    "prisma": "node scripts/prisma.js",
+    "prisma:migrate": "node scripts/prisma.js migrate dev",
+    "prisma:deploy": "node scripts/prisma.js migrate deploy",
+    "prisma:generate": "node scripts/prisma.js generate",
+    "prisma:push": "node scripts/prisma.js db push",
+    "prisma:seed": "node scripts/prisma.js db seed",
+    "prisma:reset": "node scripts/prisma.js migrate reset --force"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1032.0",
