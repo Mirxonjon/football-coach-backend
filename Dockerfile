@@ -43,4 +43,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
 
 # Wrapper script DB_* parametrlardan DATABASE_URL ni o'zi quradi,
 # keyin migration + server.
-CMD ["sh", "-c", "node scripts/prisma.js migrate deploy && node dist/main.js"]
+CMD ["sh", "-c", "node scripts/prisma.js migrate deploy && node dist/src/main.js"]
