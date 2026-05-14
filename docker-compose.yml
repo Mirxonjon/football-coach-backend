@@ -5,21 +5,16 @@ services:
       dockerfile: Dockerfile
     container_name: football-api
     restart: unless-stopped
-    ports:
-      - "${APP_PORT:-4021}:4021"
+    # Linux host tarmog'i — container `localhost` = host. Postgres host'da ishlaydi.
+    # ❗ `ports:` qatori ishlatilmaydi (host network'da port avtomatik ochiq).
+    network_mode: host
     env_file:
       - .env
     environment:
-      # Local postgres'ga "host.docker.internal" orqali ulanish.
-      # .env'dagi DB_HOST=localhost ni Docker ichida override qilamiz —
-      # qolgan DB_* qiymatlar (PORT, USER, PASS, DATABASE) .env'dan o'qiladi.
-      DB_HOST: host.docker.internal
+      # Host'ning postgres'iga to'g'ridan-to'g'ri ulanish
+      DB_HOST: localhost
       APP_HOST: 0.0.0.0
       APP_PORT: 4021
       FIREBASE_CREDENTIALS_PATH: /app/firebase-credentials.json
     volumes:
-      # Firebase service account — image ichiga kirmaydi, faqat read-only mount
       - ./firebase-credentials.json:/app/firebase-credentials.json:ro
-    # Container ichidan host'ning postgres'iga ulanish uchun
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
