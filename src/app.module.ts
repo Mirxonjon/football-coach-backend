@@ -31,6 +31,7 @@ import { StatsModule } from './modules/stats/stats.module';
 import { MasterclassCategoryModule } from './modules/masterclass-category/masterclass-category.module';
 import { MasterclassModule } from './modules/masterclass/masterclass.module';
 import { LegalModule } from './modules/legal/legal.module';
+import { BookRagModule } from './modules/book-rag/book-rag.module';
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -58,6 +59,7 @@ import { LegalModule } from './modules/legal/legal.module';
     MasterclassCategoryModule,
     MasterclassModule,
     LegalModule,
+    BookRagModule,
   ],
   providers: [
     {

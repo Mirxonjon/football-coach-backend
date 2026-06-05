@@ -7,9 +7,6 @@
 //   node scripts/prisma.js generate
 //   node scripts/prisma.js db seed
 //   node scripts/prisma.js db push
-//
-// Or via npm:
-//   npm run prisma -- migrate dev
 
 const path = require('path');
 const { spawnSync } = require('child_process');
@@ -35,9 +32,17 @@ if (host && port && user && pass && db) {
 
 const args = process.argv.slice(2);
 const isWin = process.platform === 'win32';
-const cmd = isWin ? 'npx.cmd' : 'npx';
-const result = spawnSync(cmd, ['prisma', ...args], {
+// On Windows we must spawn via `shell: true` so that the `.cmd` shim for
+// npx is resolved properly. Without it, spawnSync silently fails to
+// launch the child and returns immediately with no output.
+const result = spawnSync('npx', ['prisma', ...args], {
   stdio: 'inherit',
   env: process.env,
+  shell: isWin,
 });
+
+if (result.error) {
+  console.error('[prisma-wrapper] failed to spawn prisma:', result.error.message);
+  process.exit(1);
+}
 process.exit(result.status ?? 0);
