@@ -5,16 +5,16 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { GeminiService } from './gemini.service';
 import { ChunkingService } from './chunking.service';
 import { PdfExtractorService } from './pdf-extractor.service';
 import { detectLanguage, RagLanguage } from './language-detector';
 import { buildSystemPrompt, RetrievedChunk } from './prompts';
+import { WeaviateService } from './weaviate.service';
 
 const HISTORY_TURNS = 10;
-const TOP_K = 6;
+const TOP_K = Number(process.env.RAG_TOP_K ?? 12);
 
 @Injectable()
 export class BookRagService {
@@ -25,6 +25,7 @@ export class BookRagService {
     private readonly gemini: GeminiService,
     private readonly chunker: ChunkingService,
     private readonly pdf: PdfExtractorService,
+    private readonly weaviate: WeaviateService,
   ) {}
 
   // ─── Ownership check ─────────────────────────────────────
@@ -45,7 +46,7 @@ export class BookRagService {
     return book;
   }
 
-  // ─── User: chat history ──────────────────────────────────
+  // ─── User: chat history (Postgres) ───────────────────────
   async getOrCreateChat(userId: number, bookId: number) {
     let chat = await this.prisma.aiBookChat.findFirst({
       where: { userId, bookId },
@@ -82,6 +83,34 @@ export class BookRagService {
     return { deleted: res.count };
   }
 
+  // ─── User: full book chunks (in-app reader) ──────────────
+  async getBookChunksForUser(
+    userId: number,
+    bookId: number,
+    offset = 0,
+    limit = 100,
+  ) {
+    await this.ensureOwnsBook(userId, bookId);
+    await this.findBookOrFail(bookId);
+    const { chunks, total } = await this.weaviate.getChunksByBook({
+      bookId,
+      offset,
+      limit,
+    });
+    return {
+      bookId,
+      totalChunks: total,
+      offset,
+      limit,
+      hasMore: offset + chunks.length < total,
+      chunks: chunks.map((c) => ({
+        chunkIndex: c.chunkIndex,
+        language: c.language,
+        text: c.text,
+      })),
+    };
+  }
+
   // ─── User: send message ──────────────────────────────────
   async sendMessage(userId: number, bookId: number, message: string) {
     await this.ensureOwnsBook(userId, bookId);
@@ -92,19 +121,19 @@ export class BookRagService {
     // 1. Embed user query
     const queryVec = await this.gemini.embed(message);
 
-    // 2. pgvector search — primary language
-    let chunks = await this.searchChunks(bookId, queryVec, lang);
+    // 2. Weaviate search — primary language
+    let chunks = await this.searchBookChunks(bookId, queryVec, lang);
 
-    // 3. Fallback to all languages of this book if no chunks
+    // 3. Fallback to all languages if nothing in the user's language
     if (chunks.length === 0) {
-      chunks = await this.searchChunks(bookId, queryVec, null);
+      chunks = await this.searchBookChunks(bookId, queryVec, null);
     }
 
-    // 4. Build system prompt
+    // 4. Build prompt
     const bookTitle = lang === 'ru' ? book.titleRu : book.titleUz;
     const systemPrompt = buildSystemPrompt(lang, bookTitle, chunks);
 
-    // 5. Recent chat history (oldest first)
+    // 5. Recent history (Postgres)
     const chat = await this.getOrCreateChat(userId, bookId);
     const recent = await this.prisma.aiBookMessage.findMany({
       where: { chatId: chat.id },
@@ -116,16 +145,26 @@ export class BookRagService {
       content: m.content,
     }));
 
-    // 6. Gemini chat
+    // 6. Chat completion — temperature 0 for maximum grounding to the chunks
+    //    (less "creative" drift away from the book's content)
     const reply = await this.gemini.chat({
       systemInstruction: systemPrompt,
       history,
       userMessage: message,
-      temperature: 0.2,
-      maxOutputTokens: 800,
+      temperature: 0,
+      maxOutputTokens: 2048,
     });
 
-    // 7. Persist messages atomically
+    // 7. Build sources payload — one entry per chunk used in the prompt.
+    //    `n` matches the [N] citation the model is instructed to emit.
+    const sources = chunks.map((c, i) => ({
+      n: i + 1,
+      chunkIndex: c.chunkIndex,
+      language: c.language,
+      preview: c.content.slice(0, 240).replace(/\s+/g, ' ').trim(),
+    }));
+
+    // 8. Persist messages atomically
     await this.prisma.$transaction([
       this.prisma.aiBookMessage.create({
         data: {
@@ -143,6 +182,7 @@ export class BookRagService {
           content: reply.text,
           tokensIn: reply.tokensIn,
           tokensOut: reply.tokensOut,
+          sources,
         },
       }),
       this.prisma.aiBookChat.update({
@@ -154,42 +194,28 @@ export class BookRagService {
     return {
       answer: reply.text,
       language: lang,
-      sources: chunks.length,
+      sources,
       chatId: chat.id,
     };
   }
 
-  // ─── pgvector retrieval ──────────────────────────────────
-  private async searchChunks(
+  // ─── Weaviate retrieval ──────────────────────────────────
+  private async searchBookChunks(
     bookId: number,
     queryVec: number[],
     language: RagLanguage | null,
   ): Promise<RetrievedChunk[]> {
-    // pgvector expects vector literal: '[0.1,0.2,...]'
-    const vecLiteral = `[${queryVec.join(',')}]`;
-
-    if (language) {
-      const rows = await this.prisma.$queryRaw<
-        Array<{ content: string; language: string; chunkIndex: number }>
-      >`
-        SELECT content, language, "chunkIndex"
-        FROM "BookEmbedding"
-        WHERE "bookId" = ${bookId} AND language = ${language}
-        ORDER BY embedding <=> ${vecLiteral}::vector
-        LIMIT ${TOP_K}
-      `;
-      return rows;
-    }
-    const rows = await this.prisma.$queryRaw<
-      Array<{ content: string; language: string; chunkIndex: number }>
-    >`
-      SELECT content, language, "chunkIndex"
-      FROM "BookEmbedding"
-      WHERE "bookId" = ${bookId}
-      ORDER BY embedding <=> ${vecLiteral}::vector
-      LIMIT ${TOP_K}
-    `;
-    return rows;
+    const hits = await this.weaviate.searchChunks({
+      bookId,
+      language,
+      queryVec,
+      limit: TOP_K,
+    });
+    return hits.map((h) => ({
+      content: h.content,
+      language: h.language,
+      chunkIndex: h.chunkIndex,
+    }));
   }
 
   // ═══════════════════════════════════════════════════════
@@ -198,11 +224,10 @@ export class BookRagService {
   async reembedBook(bookId: number) {
     const book = await this.findBookOrFail(bookId);
 
-    // Determine which language files to embed.
+    // Pick source PDFs per language. Falls back to legacy `fileUrl`.
     const langs: { lang: RagLanguage; url: string }[] = [];
     if (book.fileUrlUz) langs.push({ lang: 'uz', url: book.fileUrlUz });
     if (book.fileUrlRu) langs.push({ lang: 'ru', url: book.fileUrlRu });
-    // Fallback: legacy single fileUrl → treat as 'uz' (titleUz primary).
     if (langs.length === 0 && book.fileUrl) {
       langs.push({ lang: 'uz', url: book.fileUrl });
     }
@@ -212,12 +237,21 @@ export class BookRagService {
       );
     }
 
-    // Clean-restart: delete old chunks first.
-    await this.prisma.bookEmbedding.deleteMany({ where: { bookId } });
+    // Clean-restart: drop existing chunks for this book in Weaviate.
+    try {
+      await this.weaviate.deleteByBook(bookId);
+    } catch (e: any) {
+      this.logger.warn(
+        `[RAG] Could not clear existing chunks for bookId=${bookId}: ${e?.message ?? e}`,
+      );
+    }
 
     const summary: Record<string, { chunks: number; tokens: number }> = {};
+
     for (const { lang, url } of langs) {
-      this.logger.log(`[RAG] Embedding bookId=${bookId} lang=${lang} url=${url}`);
+      this.logger.log(
+        `[RAG] Embedding bookId=${bookId} lang=${lang} url=${url}`,
+      );
       const { text, numPages } = await this.pdf.extractText(url);
       if (!text || text.trim().length < 20) {
         this.logger.warn(
@@ -230,18 +264,30 @@ export class BookRagService {
       this.logger.log(
         `[RAG] bookId=${bookId} lang=${lang} pages=${numPages} → ${chunks.length} chunk`,
       );
+      const PROGRESS_EVERY = 25;
+      const startedAt = Date.now();
       let totalTokens = 0;
-      // Embed and insert one-by-one (Gemini free tier RPM is modest).
+      let processed = 0;
       for (const c of chunks) {
         // eslint-disable-next-line no-await-in-loop
         const vec = await this.gemini.embed(c.text);
-        const vecLiteral = `[${vec.join(',')}]`;
-        // Insert via raw SQL — Prisma can't bind vector type otherwise.
         // eslint-disable-next-line no-await-in-loop
-        await this.prisma.$executeRaw`
-          INSERT INTO "BookEmbedding" ("bookId", "language", "chunkIndex", "content", "tokens", "embedding")
-          VALUES (${bookId}, ${lang}, ${c.index}, ${c.text}, ${c.approxTokens}, ${vecLiteral}::vector)
-        `;
+        await this.weaviate.insertChunk({
+          bookId,
+          language: lang,
+          chunkIndex: c.index,
+          content: c.text,
+          tokens: c.approxTokens,
+          vector: vec,
+        });
+        processed += 1;
+        if (processed % PROGRESS_EVERY === 0 || processed === chunks.length) {
+          const elapsedSec = Math.round((Date.now() - startedAt) / 1000);
+          const pct = Math.round((processed / chunks.length) * 100);
+          this.logger.log(
+            `[RAG] bookId=${bookId} lang=${lang} — ${processed}/${chunks.length} (${pct}%) · ${elapsedSec}s`,
+          );
+        }
         totalTokens += c.approxTokens;
       }
       summary[lang] = { chunks: chunks.length, tokens: totalTokens };
@@ -262,27 +308,17 @@ export class BookRagService {
 
   async getEmbeddingStatus(bookId: number) {
     await this.findBookOrFail(bookId);
-    const rows = await this.prisma.$queryRaw<
-      Array<{ language: string; count: bigint; latest: Date | null }>
-    >`
-      SELECT language, COUNT(*)::bigint AS count, MAX("createdAt") AS latest
-      FROM "BookEmbedding"
-      WHERE "bookId" = ${bookId}
-      GROUP BY language
-    `;
-    const map: Record<string, { chunks: number; latest: Date | null }> = {};
-    for (const r of rows) {
-      map[r.language] = {
-        chunks: Number(r.count),
-        latest: r.latest,
-      };
+    const stats = await this.weaviate.statsByBook(bookId);
+    const out: Record<string, { chunks: number; latest: Date | null }> = {};
+    for (const [lang, info] of Object.entries(stats.languages)) {
+      out[lang] = { chunks: info.chunks, latest: info.latest };
     }
-    return { bookId, languages: map };
+    return { bookId, languages: out };
   }
 
   async deleteEmbeddings(bookId: number) {
     await this.findBookOrFail(bookId);
-    const res = await this.prisma.bookEmbedding.deleteMany({ where: { bookId } });
-    return { bookId, deleted: res.count };
+    const deleted = await this.weaviate.deleteByBook(bookId);
+    return { bookId, deleted };
   }
 }

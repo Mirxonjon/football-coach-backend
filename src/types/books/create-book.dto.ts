@@ -16,9 +16,28 @@ export class CreateBookDto {
   @MaxLength(200)
   titleRu: string;
 
-  @ApiProperty()
+  @ApiProperty({
+    description:
+      "Default PDF URL (legacy / single-language books). Required for download. If only one language is supplied via fileUrlUz/fileUrlRu, send that same URL here too.",
+  })
   @IsString()
   fileUrl: string;
+
+  @ApiPropertyOptional({
+    description:
+      "Uzbek PDF URL. Used by Book RAG to embed UZ chunks. Optional; if absent, RAG falls back to fileUrl as UZ.",
+  })
+  @IsOptional()
+  @IsString()
+  fileUrlUz?: string;
+
+  @ApiPropertyOptional({
+    description:
+      "Russian PDF URL. Used by Book RAG to embed RU chunks. Optional; if present, RAG ignores the legacy fileUrl for the RU language.",
+  })
+  @IsOptional()
+  @IsString()
+  fileUrlRu?: string;
 
   @ApiProperty()
   @IsNumber()

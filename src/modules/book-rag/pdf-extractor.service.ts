@@ -1,7 +1,12 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
-// pdf-parse: PDF buffer → plain text
+// pdf-parse v2: class-based API — `new PDFParse({ data }).getText()`
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const pdfParse: (data: Buffer) => Promise<{ text: string; numpages: number }> = require('pdf-parse');
+const { PDFParse } = require('pdf-parse') as {
+  PDFParse: new (opts: { data: Buffer | Uint8Array }) => {
+    getText(): Promise<{ text: string; pages?: unknown[]; total?: number }>;
+    destroy?: () => Promise<void>;
+  };
+};
 
 @Injectable()
 export class PdfExtractorService {
@@ -34,12 +39,25 @@ export class PdfExtractorService {
       return { text: buf.toString('utf8'), numPages: 1 };
     }
 
+    const parser = new PDFParse({ data: buf });
     try {
-      const parsed = await pdfParse(buf);
-      return { text: parsed.text ?? '', numPages: parsed.numpages ?? 0 };
+      const parsed = await parser.getText();
+      const numPages =
+        typeof parsed.total === 'number'
+          ? parsed.total
+          : Array.isArray(parsed.pages)
+            ? parsed.pages.length
+            : 0;
+      return { text: parsed.text ?? '', numPages };
     } catch (e: any) {
       this.logger.error(`pdf-parse failed: ${e?.message}`);
       throw new BadRequestException('Could not parse PDF file');
+    } finally {
+      try {
+        await parser.destroy?.();
+      } catch {
+        /* ignore */
+      }
     }
   }
 }
