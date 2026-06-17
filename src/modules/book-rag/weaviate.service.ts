@@ -5,7 +5,7 @@ import {
   OnModuleDestroy,
   OnModuleInit,
 } from '@nestjs/common';
-import weaviate, { ApiKey, WeaviateClient } from 'weaviate-client';
+import weaviate, { ApiKey, Filters, WeaviateClient } from 'weaviate-client';
 
 /**
  * Weaviate adapter for the Book RAG vector store.
@@ -342,12 +342,10 @@ export class WeaviateService implements OnModuleInit, OnModuleDestroy {
   // ─── internals ─────────────────────────────────────────────
 
   /**
-   * Build a (bookId [AND language]) filter that works across
-   * weaviate-client v3 minor versions. Different patches expose the
-   * AND combinator either as a chained method, a static helper on the
-   * top-level `weaviate` import, or as a named `Filters` export.
-   * We probe each option at runtime and fall back to bookId-only filter
-   * (with language enforced in code) if none of them is present.
+   * Build a (bookId [AND language]) filter using weaviate-client v3's
+   * `Filters.and(...)` static combinator. `Filters` is a named export
+   * — not a property of the default `weaviate` import — so the import
+   * statement explicitly names it.
    */
   private buildBookFilter(
     col: any,
@@ -357,29 +355,7 @@ export class WeaviateService implements OnModuleInit, OnModuleDestroy {
     const byBook = col.filter.byProperty('bookId').equal(bookId);
     if (!language) return byBook;
     const byLang = col.filter.byProperty('language').equal(language);
-
-    // 1) chained .and() on a FilterValue (some v3 patches)
-    if (typeof byBook?.and === 'function') {
-      return byBook.and(byLang);
-    }
-    // 2) static Filters.and(...) helper exposed on the default import
-    const filtersStatic = (weaviate as any).Filters;
-    if (filtersStatic && typeof filtersStatic.and === 'function') {
-      return filtersStatic.and(byBook, byLang);
-    }
-    // 3) collection-level filter.and([...]) helper
-    if (typeof col.filter?.and === 'function') {
-      return col.filter.and([byBook, byLang]);
-    }
-    // 4) very old API: pass operands as object
-    if (typeof col.filter?.allOf === 'function') {
-      return col.filter.allOf([byBook, byLang]);
-    }
-
-    this.logger.warn(
-      'weaviate-client filter AND combinator not found — falling back to bookId-only filter',
-    );
-    return byBook;
+    return Filters.and(byBook, byLang);
   }
 
   private async connect(): Promise<WeaviateClient> {

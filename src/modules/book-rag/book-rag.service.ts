@@ -121,11 +121,19 @@ export class BookRagService {
     // 1. Embed user query
     const queryVec = await this.gemini.embed(message);
 
-    // 2. Weaviate search — primary language
+    // 2. Weaviate search — strict language filter first.
+    //    With the AND-combinator fix in WeaviateService.buildBookFilter,
+    //    this now actually filters by `language` (not just bookId).
     let chunks = await this.searchBookChunks(bookId, queryVec, lang);
 
-    // 3. Fallback to all languages if nothing in the user's language
-    if (chunks.length === 0) {
+    // 3. Fallback: if the user's language has < 3 hits, the book likely
+    //    isn't embedded in that language at all. Drop the filter so
+    //    Gemini still has enough material to answer (translating into
+    //    the user's language is its job — chunks stay in whatever
+    //    language the book was embedded in, but `sources[].language`
+    //    will reflect that, so the UI can flag the mismatch).
+    const FALLBACK_THRESHOLD = 3;
+    if (chunks.length < FALLBACK_THRESHOLD) {
       chunks = await this.searchBookChunks(bookId, queryVec, null);
     }
 
