@@ -9,7 +9,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { GeminiService } from './gemini.service';
 import { ChunkingService } from './chunking.service';
 import { PdfExtractorService } from './pdf-extractor.service';
-import { detectLanguage, RagLanguage } from './language-detector';
+import { detectLocale, RagLanguage } from './language-detector';
 import { buildSystemPrompt, RetrievedChunk } from './prompts';
 import { WeaviateService } from './weaviate.service';
 
@@ -116,7 +116,8 @@ export class BookRagService {
     await this.ensureOwnsBook(userId, bookId);
     const book = await this.findBookOrFail(bookId);
 
-    const lang: RagLanguage = detectLanguage(message);
+    const locale = detectLocale(message);
+    const lang: RagLanguage = locale.language;
 
     // 1. Embed user query
     const queryVec = await this.gemini.embed(message);
@@ -139,7 +140,7 @@ export class BookRagService {
 
     // 4. Build prompt
     const bookTitle = lang === 'ru' ? book.titleRu : book.titleUz;
-    const systemPrompt = buildSystemPrompt(lang, bookTitle, chunks);
+    const systemPrompt = buildSystemPrompt(lang, bookTitle, chunks, locale.script);
 
     // 5. Recent history (Postgres)
     const chat = await this.getOrCreateChat(userId, bookId);
@@ -205,6 +206,152 @@ export class BookRagService {
       sources,
       chatId: chat.id,
     };
+  }
+
+  // ─── User: send message (streaming) ──────────────────────
+  /**
+   * Streaming version of `sendMessage`. Yields SSE-ready events in order:
+   *   { kind: 'meta',   chatId, language }
+   *   { kind: 'token',  text } (many)
+   *   { kind: 'sources', sources }
+   *   { kind: 'done',   messageId, tokensIn, tokensOut, finishReason }
+   *   { kind: 'error',  code, message } (terminal; replaces 'done')
+   *
+   * The controller layer is responsible for writing these as SSE frames.
+   * Persistence happens once the stream completes — the user message and
+   * the fully assembled assistant reply are inserted in a single Prisma
+   * transaction, just like the non-streaming path.
+   */
+  async *sendMessageStream(
+    userId: number,
+    bookId: number,
+    message: string,
+  ): AsyncGenerator<
+    | { kind: 'meta'; chatId: number; language: RagLanguage }
+    | { kind: 'token'; text: string }
+    | { kind: 'sources'; sources: ReturnType<BookRagService['buildSources']> }
+    | {
+        kind: 'done';
+        messageId: number;
+        tokensIn?: number;
+        tokensOut?: number;
+        finishReason: string;
+      }
+    | { kind: 'error'; code: string; message: string }
+  > {
+    await this.ensureOwnsBook(userId, bookId);
+    const book = await this.findBookOrFail(bookId);
+
+    const locale = detectLocale(message);
+    const lang: RagLanguage = locale.language;
+    const queryVec = await this.gemini.embed(message);
+    let chunks = await this.searchBookChunks(bookId, queryVec, lang);
+    const FALLBACK_THRESHOLD = 3;
+    if (chunks.length < FALLBACK_THRESHOLD) {
+      chunks = await this.searchBookChunks(bookId, queryVec, null);
+    }
+
+    const bookTitle = lang === 'ru' ? book.titleRu : book.titleUz;
+    const systemPrompt = buildSystemPrompt(lang, bookTitle, chunks, locale.script);
+
+    const chat = await this.getOrCreateChat(userId, bookId);
+    const recent = await this.prisma.aiBookMessage.findMany({
+      where: { chatId: chat.id },
+      orderBy: { id: 'desc' },
+      take: HISTORY_TURNS,
+    });
+    const history = recent.reverse().map((m) => ({
+      role: m.role as 'user' | 'assistant',
+      content: m.content,
+    }));
+
+    // 1. Meta first — lets the UI render chat bubble before the first
+    //    token arrives, removing perceived latency.
+    yield { kind: 'meta', chatId: chat.id, language: lang };
+
+    // 2. Stream tokens from Gemini, accumulating the full text for
+    //    persistence at the end.
+    let fullText = '';
+    let finishReason = '';
+    let tokensIn: number | undefined;
+    let tokensOut: number | undefined;
+    try {
+      for await (const ev of this.gemini.chatStream({
+        systemInstruction: systemPrompt,
+        history,
+        userMessage: message,
+        temperature: 0,
+        maxOutputTokens: 2048,
+      })) {
+        if (ev.type === 'delta') {
+          fullText += ev.text;
+          yield { kind: 'token', text: ev.text };
+        } else if (ev.type === 'end') {
+          finishReason = ev.finishReason || 'STOP';
+          tokensIn = ev.tokensIn;
+          tokensOut = ev.tokensOut;
+        }
+      }
+    } catch (e: any) {
+      this.logger.error(
+        `[RAG stream] Gemini stream failed for bookId=${bookId} userId=${userId}: ${e?.message ?? e}`,
+      );
+      yield {
+        kind: 'error',
+        code: 'upstream',
+        message: "AI hozircha javob bera olmadi",
+      };
+      return;
+    }
+
+    // 3. Sources event — sent after the full text, so the UI can render
+    //    citation chips against the now-complete answer.
+    const sources = this.buildSources(chunks);
+    yield { kind: 'sources', sources };
+
+    // 4. Persist user + assistant messages in a single transaction.
+    const [, assistantMsg] = await this.prisma.$transaction([
+      this.prisma.aiBookMessage.create({
+        data: {
+          chatId: chat.id,
+          role: 'user',
+          language: lang,
+          content: message,
+        },
+      }),
+      this.prisma.aiBookMessage.create({
+        data: {
+          chatId: chat.id,
+          role: 'assistant',
+          language: lang,
+          content: fullText.trim(),
+          tokensIn,
+          tokensOut,
+          sources,
+        },
+      }),
+      this.prisma.aiBookChat.update({
+        where: { id: chat.id },
+        data: { updatedAt: new Date() },
+      }),
+    ]);
+
+    yield {
+      kind: 'done',
+      messageId: assistantMsg.id,
+      tokensIn,
+      tokensOut,
+      finishReason,
+    };
+  }
+
+  private buildSources(chunks: RetrievedChunk[]) {
+    return chunks.map((c, i) => ({
+      n: i + 1,
+      chunkIndex: c.chunkIndex,
+      language: c.language,
+      preview: c.content.slice(0, 240).replace(/\s+/g, ' ').trim(),
+    }));
   }
 
   // ─── Weaviate retrieval ──────────────────────────────────

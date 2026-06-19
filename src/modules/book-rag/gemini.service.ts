@@ -137,6 +137,125 @@ export class GeminiService {
     };
   }
 
+  /**
+   * Streaming chat completion via Gemini `streamGenerateContent?alt=sse`.
+   * Yields incremental text deltas as they arrive. The final yielded value
+   * carries the closing usage metadata (tokensIn/tokensOut) and finishReason.
+   *
+   * Consumer pattern:
+   *   for await (const ev of gemini.chatStream({...})) {
+   *     if (ev.type === 'delta') stream.write(ev.text);
+   *     if (ev.type === 'end')   final = ev;
+   *   }
+   *
+   * On a 4xx/5xx the first attempt is retried via fetchWithRetry. Errors
+   * raised by the underlying stream after headers are sent surface as
+   * thrown exceptions — callers should wrap iteration in try/catch and
+   * emit an SSE `error` event to the client.
+   */
+  async *chatStream(params: {
+    systemInstruction: string;
+    history?: ChatTurn[];
+    userMessage: string;
+    temperature?: number;
+    maxOutputTokens?: number;
+  }): AsyncGenerator<
+    | { type: 'delta'; text: string }
+    | {
+        type: 'end';
+        finishReason: string;
+        tokensIn?: number;
+        tokensOut?: number;
+      },
+    void,
+    void
+  > {
+    this.assertConfigured();
+    const {
+      systemInstruction,
+      history = [],
+      userMessage,
+      temperature = 0.2,
+      maxOutputTokens = 2048,
+    } = params;
+
+    const contents = [
+      ...history.map((t) => ({
+        role: t.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: t.content }],
+      })),
+      { role: 'user', parts: [{ text: userMessage }] },
+    ];
+
+    const url = `${BASE}/models/${this.chatModel}:streamGenerateContent?alt=sse`;
+    const body = {
+      system_instruction: { parts: [{ text: systemInstruction }] },
+      contents,
+      generationConfig: {
+        temperature,
+        maxOutputTokens,
+        thinkingConfig: { thinkingBudget: 0 },
+      },
+    };
+
+    const res = await this.fetchWithRetry(url, body, 'chat');
+    if (!res.body) {
+      throw new InternalServerErrorException(
+        'Gemini stream returned no body',
+      );
+    }
+
+    const reader = (res.body as any).getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buffer = '';
+    let finishReason = '';
+    let tokensIn: number | undefined;
+    let tokensOut: number | undefined;
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      // Gemini's SSE stream uses CRLF (\r\n) line endings, not LF.
+      // Normalise here so the frame splitter on "\n\n" works.
+      buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n');
+
+      // SSE frames separated by blank line ("\n\n"). Each frame may have
+      // multiple `data: ...` lines (per the spec we concatenate them with
+      // a newline so multi-line JSON stays intact).
+      let sepAt: number;
+      while ((sepAt = buffer.indexOf('\n\n')) !== -1) {
+        const frame = buffer.slice(0, sepAt);
+        buffer = buffer.slice(sepAt + 2);
+        const payload = frame
+          .split('\n')
+          .filter((l) => l.startsWith('data:'))
+          .map((l) => l.slice(5).trimStart())
+          .join('\n');
+        if (!payload || payload === '[DONE]') continue;
+        try {
+          const json = JSON.parse(payload);
+          const cand = json?.candidates?.[0];
+          const text: string =
+            cand?.content?.parts
+              ?.map((p: any) => p?.text ?? '')
+              .join('') ?? '';
+          if (text) yield { type: 'delta', text };
+          if (cand?.finishReason) finishReason = cand.finishReason;
+          if (json?.usageMetadata) {
+            tokensIn = json.usageMetadata.promptTokenCount ?? tokensIn;
+            tokensOut = json.usageMetadata.candidatesTokenCount ?? tokensOut;
+          }
+        } catch (e: any) {
+          this.logger.warn(
+            `Gemini stream frame parse failed: ${e?.message ?? e}`,
+          );
+        }
+      }
+    }
+
+    yield { type: 'end', finishReason, tokensIn, tokensOut };
+  }
+
   // ─── internals ─────────────────────────────────────────────
 
   private async respectThrottle() {
