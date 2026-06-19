@@ -122,27 +122,17 @@ export class BookRagService {
     // 1. Embed user query
     const queryVec = await this.gemini.embed(message);
 
-    // 2. Weaviate search — strict language filter first.
-    //    With the AND-combinator fix in WeaviateService.buildBookFilter,
-    //    this now actually filters by `language` (not just bookId).
-    let chunks = await this.searchBookChunks(bookId, queryVec, lang);
+    // 2. Weaviate search — bookId-only (one book = one language;
+    //    filtering by language is redundant). The AI coach translates
+    //    chunks into whatever language the user asked in.
+    const chunks = await this.searchBookChunks(bookId, queryVec, null);
 
-    // 3. Fallback: if the user's language has < 3 hits, the book likely
-    //    isn't embedded in that language at all. Drop the filter so
-    //    Gemini still has enough material to answer (translating into
-    //    the user's language is its job — chunks stay in whatever
-    //    language the book was embedded in, but `sources[].language`
-    //    will reflect that, so the UI can flag the mismatch).
-    const FALLBACK_THRESHOLD = 3;
-    if (chunks.length < FALLBACK_THRESHOLD) {
-      chunks = await this.searchBookChunks(bookId, queryVec, null);
-    }
-
-    // 4. Build prompt
+    // 3. Build prompt — answer-language = user's question language,
+    //    chunks stay in the book's original language.
     const bookTitle = lang === 'ru' ? book.titleRu : book.titleUz;
     const systemPrompt = buildSystemPrompt(lang, bookTitle, chunks, locale.script);
 
-    // 5. Recent history (Postgres)
+    // 4. Recent history (Postgres)
     const chat = await this.getOrCreateChat(userId, bookId);
     const recent = await this.prisma.aiBookMessage.findMany({
       where: { chatId: chat.id },
@@ -154,7 +144,7 @@ export class BookRagService {
       content: m.content,
     }));
 
-    // 6. Chat completion — temperature 0 for maximum grounding to the chunks
+    // 5. Chat completion — temperature 0 for maximum grounding to the chunks
     //    (less "creative" drift away from the book's content)
     const reply = await this.gemini.chat({
       systemInstruction: systemPrompt,
@@ -245,11 +235,9 @@ export class BookRagService {
     const locale = detectLocale(message);
     const lang: RagLanguage = locale.language;
     const queryVec = await this.gemini.embed(message);
-    let chunks = await this.searchBookChunks(bookId, queryVec, lang);
-    const FALLBACK_THRESHOLD = 3;
-    if (chunks.length < FALLBACK_THRESHOLD) {
-      chunks = await this.searchBookChunks(bookId, queryVec, null);
-    }
+    // Single-source book → no language filter on retrieval; the coach
+    // translates whatever it finds into the user's question language.
+    const chunks = await this.searchBookChunks(bookId, queryVec, null);
 
     const bookTitle = lang === 'ru' ? book.titleRu : book.titleUz;
     const systemPrompt = buildSystemPrompt(lang, bookTitle, chunks, locale.script);
@@ -376,19 +364,18 @@ export class BookRagService {
   // ═══════════════════════════════════════════════════════
   // ADMIN: re-embed a book
   // ═══════════════════════════════════════════════════════
+  //
+  // Single-source design: one book = one `fileUrl`, original language.
+  // The book's language is auto-detected at embed time and stored on every
+  // chunk so the UI can show a "language" badge. Retrieval does not filter
+  // by language (there's only one), and the AI coach translates the answer
+  // into whatever language the user asked in.
   async reembedBook(bookId: number) {
     const book = await this.findBookOrFail(bookId);
 
-    // Pick source PDFs per language. Falls back to legacy `fileUrl`.
-    const langs: { lang: RagLanguage; url: string }[] = [];
-    if (book.fileUrlUz) langs.push({ lang: 'uz', url: book.fileUrlUz });
-    if (book.fileUrlRu) langs.push({ lang: 'ru', url: book.fileUrlRu });
-    if (langs.length === 0 && book.fileUrl) {
-      langs.push({ lang: 'uz', url: book.fileUrl });
-    }
-    if (langs.length === 0) {
+    if (!book.fileUrl) {
       throw new BadRequestException(
-        "Kitobning fileUrl / fileUrlUz / fileUrlRu maydonlari bo'sh",
+        "Kitobning fileUrl maydoni bo'sh — PDF yuklang",
       );
     }
 
@@ -401,74 +388,84 @@ export class BookRagService {
       );
     }
 
-    const summary: Record<string, { chunks: number; tokens: number }> = {};
+    this.logger.log(
+      `[RAG] Embedding bookId=${bookId} url=${book.fileUrl}`,
+    );
+    const { text, numPages } = await this.pdf.extractText(book.fileUrl);
+    if (!text || text.trim().length < 20) {
+      this.logger.warn(
+        `[RAG] bookId=${bookId} matn bo'sh yoki juda qisqa (${text.length} char)`,
+      );
+      return {
+        bookId,
+        language: 'uz' as RagLanguage,
+        chunks: 0,
+        tokens: 0,
+        pages: numPages,
+      };
+    }
 
-    for (const { lang, url } of langs) {
-      this.logger.log(
-        `[RAG] Embedding bookId=${bookId} lang=${lang} url=${url}`,
-      );
-      const { text, numPages } = await this.pdf.extractText(url);
-      if (!text || text.trim().length < 20) {
-        this.logger.warn(
-          `[RAG] bookId=${bookId} lang=${lang} matn bo'sh yoki juda qisqa (${text.length} char)`,
+    // Auto-detect book language from its first ~4k chars (representative).
+    const detectedLang: RagLanguage = detectLocale(text.slice(0, 4000)).language;
+    const chunks = this.chunker.chunk(text);
+    this.logger.log(
+      `[RAG] bookId=${bookId} detected=${detectedLang} pages=${numPages} → ${chunks.length} chunk`,
+    );
+
+    const PROGRESS_EVERY = 25;
+    const startedAt = Date.now();
+    let totalTokens = 0;
+    let processed = 0;
+    for (const c of chunks) {
+      // eslint-disable-next-line no-await-in-loop
+      const vec = await this.gemini.embed(c.text);
+      // eslint-disable-next-line no-await-in-loop
+      await this.weaviate.insertChunk({
+        bookId,
+        language: detectedLang,
+        chunkIndex: c.index,
+        content: c.text,
+        tokens: c.approxTokens,
+        vector: vec,
+      });
+      processed += 1;
+      if (processed % PROGRESS_EVERY === 0 || processed === chunks.length) {
+        const elapsedSec = Math.round((Date.now() - startedAt) / 1000);
+        const pct = Math.round((processed / chunks.length) * 100);
+        this.logger.log(
+          `[RAG] bookId=${bookId} — ${processed}/${chunks.length} (${pct}%) · ${elapsedSec}s`,
         );
-        summary[lang] = { chunks: 0, tokens: 0 };
-        continue;
       }
-      const chunks = this.chunker.chunk(text);
-      this.logger.log(
-        `[RAG] bookId=${bookId} lang=${lang} pages=${numPages} → ${chunks.length} chunk`,
-      );
-      const PROGRESS_EVERY = 25;
-      const startedAt = Date.now();
-      let totalTokens = 0;
-      let processed = 0;
-      for (const c of chunks) {
-        // eslint-disable-next-line no-await-in-loop
-        const vec = await this.gemini.embed(c.text);
-        // eslint-disable-next-line no-await-in-loop
-        await this.weaviate.insertChunk({
-          bookId,
-          language: lang,
-          chunkIndex: c.index,
-          content: c.text,
-          tokens: c.approxTokens,
-          vector: vec,
-        });
-        processed += 1;
-        if (processed % PROGRESS_EVERY === 0 || processed === chunks.length) {
-          const elapsedSec = Math.round((Date.now() - startedAt) / 1000);
-          const pct = Math.round((processed / chunks.length) * 100);
-          this.logger.log(
-            `[RAG] bookId=${bookId} lang=${lang} — ${processed}/${chunks.length} (${pct}%) · ${elapsedSec}s`,
-          );
-        }
-        totalTokens += c.approxTokens;
-      }
-      summary[lang] = { chunks: chunks.length, tokens: totalTokens };
+      totalTokens += c.approxTokens;
     }
 
     return {
       bookId,
-      languages: summary,
-      total: Object.values(summary).reduce(
-        (acc, v) => ({
-          chunks: acc.chunks + v.chunks,
-          tokens: acc.tokens + v.tokens,
-        }),
-        { chunks: 0, tokens: 0 },
-      ),
+      language: detectedLang,
+      chunks: chunks.length,
+      tokens: totalTokens,
+      pages: numPages,
     };
   }
 
   async getEmbeddingStatus(bookId: number) {
     await this.findBookOrFail(bookId);
     const stats = await this.weaviate.statsByBook(bookId);
-    const out: Record<string, { chunks: number; latest: Date | null }> = {};
-    for (const [lang, info] of Object.entries(stats.languages)) {
-      out[lang] = { chunks: info.chunks, latest: info.latest };
-    }
-    return { bookId, languages: out };
+    // Single-source book — pick the dominant language (in practice the
+    // only one) for a flat summary, but keep the breakdown for any
+    // legacy multi-language books that may still exist.
+    const breakdown = stats.languages;
+    const dominant = Object.entries(breakdown).sort(
+      (a, b) => b[1].chunks - a[1].chunks,
+    )[0];
+    return {
+      bookId,
+      language: dominant?.[0] ?? null,
+      chunks: dominant?.[1].chunks ?? 0,
+      latest: dominant?.[1].latest ?? null,
+      total: stats.total,
+      breakdown,
+    };
   }
 
   async deleteEmbeddings(bookId: number) {
