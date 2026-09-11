@@ -7,5 +7,14 @@ export interface ChargeResult {
 
 export interface PaymentProvider {
   readonly name: string;
-  charge(amount: number, cardToken: string): Promise<ChargeResult>;
+  /**
+   * `transactionParam` — bizning WalletTransaction.id imiz. Provayderga
+   * o'zgarmas kalit sifatida uzatiladi, shunda tarmoq uzilib qayta
+   * urinilganda bir to'lov ikki marta yechilmaydi.
+   */
+  charge(
+    amount: number,
+    cardToken: string,
+    transactionParam: string,
+  ): Promise<ChargeResult>;
 }

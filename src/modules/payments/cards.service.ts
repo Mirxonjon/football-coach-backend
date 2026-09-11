@@ -67,7 +67,6 @@ export class CardsService {
         })
       : await this.prisma.card.create({
           data: {
-            id: Date.now(),
             userId,
             provider: 'click',
             token: res.card_token,

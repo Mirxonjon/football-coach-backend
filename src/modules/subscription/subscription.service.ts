@@ -76,12 +76,37 @@ export class SubscriptionService {
 
     const amount = this.calculateFinalPrice(plan);
 
-    // If a card was provided, charge it via Click BEFORE creating the subscription row.
-    let chargeExternalId: string | null = null;
+    // To'lov yozuvini AVVAL PENDING holatda yaratamiz: uning id'si Click uchun
+    // o'zgarmas `transaction_parameter` bo'ladi. Shu tufayli tarmoq uzilib
+    // qayta urinilsa ham bir to'lov ikki marta yechilmaydi, va muvaffaqiyatsiz
+    // urinish ham audit uchun bazada qoladi.
+    let transaction = await this.prisma.walletTransaction.create({
+      data: {
+        userId,
+        amount,
+        subscriptionsPlansId: plan.id,
+        cardId: card?.id ?? null,
+        status: 'PENDING',
+        provider: card ? 'click' : null,
+      },
+    });
+
     let paymentStatus: 'PENDING' | 'SUCCESS' = 'PENDING';
     if (card) {
-      const charge = await this.click.charge(amount, card.token);
+      const charge = await this.click.charge(
+        amount,
+        card.token,
+        String(transaction.id),
+      );
       if (!charge.success) {
+        await this.prisma.walletTransaction.update({
+          where: { id: transaction.id },
+          data: {
+            status: 'FAILED',
+            errorCode: charge.errorCode ?? null,
+            errorMessage: charge.errorMessage ?? null,
+          },
+        });
         throw new HttpException(
           {
             message: 'Payment failed',
@@ -91,7 +116,10 @@ export class SubscriptionService {
           HttpStatus.PAYMENT_REQUIRED,
         );
       }
-      chargeExternalId = charge.externalId ?? null;
+      transaction = await this.prisma.walletTransaction.update({
+        where: { id: transaction.id },
+        data: { status: 'SUCCESS', externalId: charge.externalId ?? null },
+      });
       paymentStatus = 'SUCCESS';
     }
 
@@ -99,33 +127,17 @@ export class SubscriptionService {
     const endDate = new Date(now);
     endDate.setDate(endDate.getDate() + plan.durationDays);
 
-    const [subscription, transaction] = await this.prisma.$transaction(async (tx) => {
-      const walletTx = await tx.walletTransaction.create({
-        data: {
-          userId,
-          amount,
-          subscriptionsPlansId: plan.id,
-          cardId: card?.id ?? null,
-          status: paymentStatus,
-          provider: card ? 'click' : null,
-          externalId: chargeExternalId,
-        },
-      });
-
-      const sub = await tx.subscription.create({
-        data: {
-          userId,
-          subscriptionsPlansId: plan.id,
-          startDate,
-          endDate,
-          isActive: paymentStatus === 'SUCCESS',
-          autoPay: !!dto.autoPay,
-          cardId: card?.id ?? null,
-        },
-        include: { subscriptionsPlan: true },
-      });
-
-      return [sub, walletTx];
+    const subscription = await this.prisma.subscription.create({
+      data: {
+        userId,
+        subscriptionsPlansId: plan.id,
+        startDate,
+        endDate,
+        isActive: paymentStatus === 'SUCCESS',
+        autoPay: !!dto.autoPay,
+        cardId: card?.id ?? null,
+      },
+      include: { subscriptionsPlan: true },
     });
 
     return {

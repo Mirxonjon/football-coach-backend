@@ -64,15 +64,30 @@ export class SubscriptionCron {
         }
 
         const amount = this.priceFor(sub.subscriptionsPlan);
-        const charge = await this.click.charge(amount, card.token);
 
-        await this.prisma.walletTransaction.create({
+        // To'lov yozuvi avval PENDING — id'si Click uchun o'zgarmas kalit.
+        // Cron kunlik ishlagani uchun bu ayniqsa muhim: bir kun yiqilib,
+        // ertasiga qayta urinilsa, Click aynan o'sha to'lovni taniydi.
+        const walletTx = await this.prisma.walletTransaction.create({
           data: {
             userId: sub.userId,
             amount,
             cardId: card.id,
             subscriptionsPlansId: sub.subscriptionsPlansId,
             provider: 'click',
+            status: 'PENDING',
+          },
+        });
+
+        const charge = await this.click.charge(
+          amount,
+          card.token,
+          String(walletTx.id),
+        );
+
+        await this.prisma.walletTransaction.update({
+          where: { id: walletTx.id },
+          data: {
             status: charge.success ? 'SUCCESS' : 'FAILED',
             externalId: charge.externalId ?? null,
             errorCode: charge.errorCode ?? null,

@@ -173,7 +173,7 @@ model Notification {
 }
 
 model Card {
-  id          Int      @id
+  id          Int      @id @default(autoincrement())
   userId      Int      @unique
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   provider    String   @default("click")

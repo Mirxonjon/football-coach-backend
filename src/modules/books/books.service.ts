@@ -216,16 +216,28 @@ export class BooksService {
     // Pick a card.
     const card = await this.resolveCard(userId, cardId);
 
-    // Charge Click.
-    const charge = await this.click.charge(finalPrice, card.token);
+    // To'lov yozuvini avval PENDING holatda yaratamiz — uning id'si Click uchun
+    // o'zgarmas kalit (`transaction_parameter`), qayta urinishda takroriy
+    // yechilishning oldini oladi.
+    let transaction = await this.prisma.walletTransaction.create({
+      data: {
+        userId,
+        cardId: card.id,
+        amount: finalPrice,
+        provider: 'click',
+        status: 'PENDING',
+      },
+    });
+
+    const charge = await this.click.charge(
+      finalPrice,
+      card.token,
+      String(transaction.id),
+    );
     if (!charge.success) {
-      // Record the attempt for audit, then surface the error to the client.
-      await this.prisma.walletTransaction.create({
+      await this.prisma.walletTransaction.update({
+        where: { id: transaction.id },
         data: {
-          userId,
-          cardId: card.id,
-          amount: finalPrice,
-          provider: 'click',
           status: 'FAILED',
           externalId: charge.externalId ?? null,
           errorCode: charge.errorCode ?? null,
@@ -245,18 +257,12 @@ export class BooksService {
       );
     }
 
-    // Success — write the transaction and grant the book in one go so we
+    // Success — mark the transaction paid and grant the book in one go so we
     // never end up charged-but-no-book or vice versa.
-    const [userBook, transaction] = await this.prisma.$transaction(async (tx) => {
-      const walletTx = await tx.walletTransaction.create({
-        data: {
-          userId,
-          cardId: card.id,
-          amount: finalPrice,
-          provider: 'click',
-          status: 'SUCCESS',
-          externalId: charge.externalId ?? null,
-        },
+    const [userBook, paidTx] = await this.prisma.$transaction(async (tx) => {
+      const walletTx = await tx.walletTransaction.update({
+        where: { id: transaction.id },
+        data: { status: 'SUCCESS', externalId: charge.externalId ?? null },
       });
       const ub = await tx.userBook.create({
         data: { userId, bookId, transactionId: walletTx.id },
@@ -264,6 +270,7 @@ export class BooksService {
       });
       return [ub, walletTx];
     });
+    transaction = paidTx;
 
     this.logger.log(
       `[BOOK-BUY] ✓ userId=${userId} bookId=${bookId} amount=${finalPrice} txId=${transaction.id}`,
