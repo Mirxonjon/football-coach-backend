@@ -18,6 +18,8 @@ export class CardsService {
   async list(userId: number) {
     return this.prisma.card.findMany({
       where: { userId },
+      // Eng yangisi tepada — bir nechta karta bo'lganda tartib barqaror bo'lsin.
+      orderBy: { createdAt: 'desc' },
       select: {
         id: true,
         last4: true,
@@ -39,21 +41,36 @@ export class CardsService {
    * never leaves the backend.
    */
   async initAdd(userId: number, dto: InitCardDto) {
-    const existing = await this.prisma.card.findUnique({ where: { userId } });
-    if (existing?.isVerified) {
-      throw new ConflictException(
-        'Card already saved — remove it before adding a new one',
-      );
+    const last4 = dto.cardNumber.slice(-4);
+
+    // Foydalanuvchi bir nechta karta saqlashi mumkin, lekin AYNAN shu kartani
+    // ikki marta emas. Bir xillikni last4 + amal qilish muddati bo'yicha
+    // aniqlaymiz — to'liq raqamni biz saqlamaymiz.
+    const duplicate = await this.prisma.card.findFirst({
+      where: {
+        userId,
+        last4,
+        expireDate: dto.expireDate,
+        isVerified: true,
+      },
+    });
+    if (duplicate) {
+      throw new ConflictException('This card is already saved');
     }
 
     const res = await this.click.requestCardToken(dto.cardNumber, dto.expireDate);
-    const last4 = dto.cardNumber.slice(-4);
 
-    // Reuse the same row if the user is retrying an unverified init (keeps the
-    // one-card-per-user invariant intact), otherwise create a new pending row.
-    const card = existing
+    // Tasdiqlanmagan urinish qolgan bo'lsa (SMS kelmadi, foydalanuvchi qaytadan
+    // bosdi) — o'sha qatorni qayta ishlatamiz, aks holda yangisini yaratamiz.
+    // Shunda yarim qolgan yozuvlar to'planib qolmaydi.
+    const pending = await this.prisma.card.findFirst({
+      where: { userId, last4, expireDate: dto.expireDate, isVerified: false },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const card = pending
       ? await this.prisma.card.update({
-          where: { userId },
+          where: { id: pending.id },
           data: {
             provider: 'click',
             token: res.card_token,
@@ -134,6 +151,15 @@ export class CardsService {
     } catch {}
 
     await this.prisma.card.delete({ where: { id: cardId } });
+
+    // Subscription.cardId — tashqi kalitsiz oddiy Int, shuning uchun o'zi
+    // tozalanmaydi. Osilib qolgan havolani olib tashlaymiz va avtomatik
+    // uzaytirishni o'chiramiz: karta yo'q bo'lsa u baribir ishlamaydi, lekin
+    // foydalanuvchi holatni sozlamalarda aniq ko'rib tursin.
+    await this.prisma.subscription.updateMany({
+      where: { userId, cardId },
+      data: { cardId: null, autoPay: false },
+    });
   }
 }
 

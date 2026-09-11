@@ -174,7 +174,8 @@ model Notification {
 
 model Card {
   id          Int      @id @default(autoincrement())
-  userId      Int      @unique
+  // Foydalanuvchi bir nechta karta saqlashi mumkin — bu yerda @unique yo'q.
+  userId      Int
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   provider    String   @default("click")
   token       String
@@ -188,6 +189,8 @@ model Card {
   updatedAt   DateTime @updatedAt
 
   walletTx WalletTransaction[]
+
+  @@index([userId])
 }
 
 model WalletTransaction {
