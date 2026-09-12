@@ -35,7 +35,19 @@ async function bootstrap() {
 
   const configService = app.get(ConfigService);
   const appConfig = configService.get<AppConfig>(CONFIG_APP_TOKEN);
-  const corsOrigin: string = appConfig.cors_domains;
+  // CORS_DOMAINS vergul bilan ajratilgan ro'yxat bo'lishi mumkin. Uni massivga
+  // bo'lish SHART: xom satr uzatilsa, brauzer
+  // `Access-Control-Allow-Origin: http://a,http://b` ni yaroqsiz deb rad etadi
+  // va barcha so'rovlar bloklanadi. Massiv berilsa, cors mos originni o'zi
+  // tanlab, bitta qiymat qaytaradi.
+  const rawCors: string = appConfig.cors_domains ?? '*';
+  const corsOrigin: string | string[] =
+    rawCors.trim() === '*'
+      ? '*'
+      : rawCors
+          .split(',')
+          .map((o) => o.trim())
+          .filter(Boolean);
 
   app.setGlobalPrefix('v1');
   app.use(bodyParser.json({ limit: '10mb' }));

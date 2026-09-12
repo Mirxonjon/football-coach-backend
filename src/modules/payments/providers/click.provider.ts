@@ -119,7 +119,11 @@ export class ClickProvider implements PaymentProvider {
 
   // ─── Charging saved card ───
 
-  async charge(amount: number, cardToken: string): Promise<ChargeResult> {
+  async charge(
+    amount: number,
+    cardToken: string,
+    transactionParam: string,
+  ): Promise<ChargeResult> {
     if (!this.isConfigured()) {
       // Allow dev environments to run without Click creds — fail loudly but structured.
       this.logger.warn('Click charge skipped — provider not configured');
@@ -141,7 +145,8 @@ export class ClickProvider implements PaymentProvider {
           service_id: Number(this.serviceId),
           card_token: cardToken,
           amount,
-          transaction_parameter: `auto-${Date.now()}`,
+          // O'zgarmas kalit — qayta urinishda Click aynan shu to'lovni taniydi.
+          transaction_parameter: transactionParam,
         }),
       });
 

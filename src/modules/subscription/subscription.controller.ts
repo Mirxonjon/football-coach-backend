@@ -32,7 +32,8 @@ export class SubscriptionController {
 
   @Post('me')
   @ApiOperation({
-    summary: 'Subscribe to a plan. Pass cardId to charge an existing Click card immediately.',
+    summary:
+      'Subscribe to a plan. Paid plans require cardId (charged via Click immediately); free plans activate without a card.',
   })
   subscribe(@Req() req: Request, @Body() dto: CreateSubscriptionDto) {
     const userId = (req as any).user.sub as number;
