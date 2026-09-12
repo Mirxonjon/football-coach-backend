@@ -76,6 +76,15 @@ export class SubscriptionService {
 
     const amount = this.calculateFinalPrice(plan);
 
+    // Pullik tarifga faqat karta bilan obuna bo'linadi. Aks holda to'lanmagan
+    // PENDING obunalar cheksiz yig'ilib qolardi (409 tekshiruvi faqat faol
+    // obunani ko'radi). Bepul tarif (amount = 0) kartasiz ham faollashadi.
+    if (amount > 0 && !card) {
+      throw new BadRequestException(
+        'cardId is required for a paid plan — add a card first',
+      );
+    }
+
     // To'lov yozuvini AVVAL PENDING holatda yaratamiz: uning id'si Click uchun
     // o'zgarmas `transaction_parameter` bo'ladi. Shu tufayli tarmoq uzilib
     // qayta urinilsa ham bir to'lov ikki marta yechilmaydi, va muvaffaqiyatsiz
@@ -92,7 +101,14 @@ export class SubscriptionService {
     });
 
     let paymentStatus: 'PENDING' | 'SUCCESS' = 'PENDING';
-    if (card) {
+    if (amount === 0) {
+      // Bepul tarif — to'lov yo'q, darrov faol.
+      transaction = await this.prisma.walletTransaction.update({
+        where: { id: transaction.id },
+        data: { status: 'SUCCESS' },
+      });
+      paymentStatus = 'SUCCESS';
+    } else if (card) {
       const charge = await this.click.charge(
         amount,
         card.token,
